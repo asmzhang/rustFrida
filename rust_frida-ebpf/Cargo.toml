@@ -1,0 +1,23 @@
+[package]
+name = "rust_frida-ebpf"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aya-ebpf = "0.1.1"
+aya-log-ebpf = "0.1"
+
+[profile.dev]
+opt-level = 3
+debug = false
+overflow-checks = false
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = true
+overflow-checks = false
+
+[[bin]]
+name = "dlopen_probe"
+path = "src/main.rs"

@@ -856,7 +856,16 @@ pub fn hfollow(lib:&str,addr:usize) {
 // JNI 函数签名: (JNIEnv*, jobject/jclass) -> 返回值
 pub extern "C" fn replaceq(jenv: RWord, jobj: RWord) -> RWord {
     get_interceptor().revert(NativePointer(GLOBAL_TARGET.get().unwrap().clone() as *mut c_void));
-    log_msg(format!("replaceq: arg1=0x{:x}, arg2=0x{:x}", jenv, jobj));
+    log_msg(format!("replaceq: arg1=0x{:x}, arg2=0x{:x}\n", jenv, jobj));
+    let value:u64;
+    unsafe {
+        core::arch::asm!(
+        "mrs {0}, tpidr_el0",
+        out(reg) value,
+        options(nomem, nostack, preserves_flags),
+        );
+    }
+    log_msg(format!("tls=0x{:x}", value));
     // start_dump_mem();
 
     // 使用在 qfollow 中初始化的全局 VM

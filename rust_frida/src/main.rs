@@ -352,6 +352,8 @@ fn main() {
         }
     }
 
+    // 通知监听线程退出（防止 agent 从未连接时 join 永久阻塞）
+    communication::STOP_LISTENER.store(true, Ordering::SeqCst);
     // 等待监听线程退出
     handle.join().unwrap();
 

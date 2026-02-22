@@ -78,7 +78,7 @@ unsafe extern "C" fn memory_read_u16(
     if !is_addr_accessible(addr, 2) {
         return ffi::JS_ThrowRangeError(ctx, b"Invalid memory address\0".as_ptr() as *const _);
     }
-    let val = *(addr as *const u16);
+    let val = std::ptr::read_unaligned(addr as *const u16);
     JSValue::int(val as i32).raw()
 }
 
@@ -104,7 +104,7 @@ unsafe extern "C" fn memory_read_u32(
     if !is_addr_accessible(addr, 4) {
         return ffi::JS_ThrowRangeError(ctx, b"Invalid memory address\0".as_ptr() as *const _);
     }
-    let val = *(addr as *const u32);
+    let val = std::ptr::read_unaligned(addr as *const u32);
     // Use BigInt for values that might overflow i32
     ffi::JS_NewBigUint64(ctx, val as u64)
 }
@@ -131,7 +131,7 @@ unsafe extern "C" fn memory_read_u64(
     if !is_addr_accessible(addr, 8) {
         return ffi::JS_ThrowRangeError(ctx, b"Invalid memory address\0".as_ptr() as *const _);
     }
-    let val = *(addr as *const u64);
+    let val = std::ptr::read_unaligned(addr as *const u64);
     ffi::JS_NewBigUint64(ctx, val)
 }
 
@@ -157,7 +157,7 @@ unsafe extern "C" fn memory_read_pointer(
     if !is_addr_accessible(addr, 8) {
         return ffi::JS_ThrowRangeError(ctx, b"Invalid memory address\0".as_ptr() as *const _);
     }
-    let val = *(addr as *const u64);
+    let val = std::ptr::read_unaligned(addr as *const u64);
     create_native_pointer(ctx, val).raw()
 }
 
@@ -183,8 +183,27 @@ unsafe extern "C" fn memory_read_cstring(
     if !is_addr_accessible(addr, 1) {
         return ffi::JS_ThrowRangeError(ctx, b"Invalid memory address\0".as_ptr() as *const _);
     }
-    let cstr = std::ffi::CStr::from_ptr(addr as *const _);
-    let s = cstr.to_string_lossy();
+    // Bounded scan: find '\0' within MAX_CSTRING_LEN bytes to avoid SEGV on unterminated buffers.
+    const MAX_CSTRING_LEN: usize = 4096;
+    let mut len = 0usize;
+    while len < MAX_CSTRING_LEN {
+        let byte_addr = addr + len as u64;
+        if !is_addr_accessible(byte_addr, 1) {
+            break;
+        }
+        if *(byte_addr as *const u8) == 0 {
+            break;
+        }
+        len += 1;
+    }
+    if len >= MAX_CSTRING_LEN {
+        return ffi::JS_ThrowRangeError(
+            ctx,
+            b"readCString: string exceeds maximum length (4096)\0".as_ptr() as *const _,
+        );
+    }
+    let slice = std::slice::from_raw_parts(addr as *const u8, len);
+    let s = String::from_utf8_lossy(slice);
     JSValue::string(ctx, &s).raw()
 }
 
@@ -279,7 +298,7 @@ unsafe extern "C" fn memory_write_u16(
         return ffi::JS_ThrowRangeError(ctx, b"Invalid memory address\0".as_ptr() as *const _);
     }
     let val = JSValue(*argv.add(1)).to_i64(ctx).unwrap_or(0) as u16;
-    *(addr as *mut u16) = val;
+    std::ptr::write_unaligned(addr as *mut u16, val);
     JSValue::undefined().raw()
 }
 
@@ -306,7 +325,7 @@ unsafe extern "C" fn memory_write_u32(
         return ffi::JS_ThrowRangeError(ctx, b"Invalid memory address\0".as_ptr() as *const _);
     }
     let val = JSValue(*argv.add(1)).to_i64(ctx).unwrap_or(0) as u32;
-    *(addr as *mut u32) = val;
+    std::ptr::write_unaligned(addr as *mut u32, val);
     JSValue::undefined().raw()
 }
 
@@ -333,7 +352,7 @@ unsafe extern "C" fn memory_write_u64(
         return ffi::JS_ThrowRangeError(ctx, b"Invalid memory address\0".as_ptr() as *const _);
     }
     let val = JSValue(*argv.add(1)).to_u64(ctx).unwrap_or(0);
-    *(addr as *mut u64) = val;
+    std::ptr::write_unaligned(addr as *mut u64, val);
     JSValue::undefined().raw()
 }
 

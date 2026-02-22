@@ -34,17 +34,27 @@ impl<T: Clone> SyncChannel<T> {
 
     /// 设置值并通知所有等待者（由 handle_socket_connection 调用）。
     pub(crate) fn send(&self, val: T) {
-        if let Ok(mut guard) = self.mutex.lock() {
-            *guard = Some(val);
-            self.cvar.notify_all();
-        }
+        let mut guard = match self.mutex.lock() {
+            Ok(g) => g,
+            Err(e) => {
+                log_error!("SyncChannel::send: mutex poisoned, recovering");
+                e.into_inner()
+            }
+        };
+        *guard = Some(val);
+        self.cvar.notify_all();
     }
 
     /// 清除当前值。
     pub(crate) fn clear(&self) {
-        if let Ok(mut guard) = self.mutex.lock() {
-            *guard = None;
-        }
+        let mut guard = match self.mutex.lock() {
+            Ok(g) => g,
+            Err(e) => {
+                log_error!("SyncChannel::clear: mutex poisoned, recovering");
+                e.into_inner()
+            }
+        };
+        *guard = None;
     }
 
     /// 在持锁状态下清除值、调用 `f`（通常用于发送请求），再阻塞等待值到来或超时。

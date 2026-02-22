@@ -70,8 +70,11 @@ unsafe extern "C" fn hook_callback_wrapper(
 
     let target_addr = user_data as u64;
 
-    // Get the stored callback
-    let guard = HOOK_REGISTRY.lock().unwrap();
+    // Get the stored callback — use ok() to avoid panic on mutex poison in signal context
+    let guard = match HOOK_REGISTRY.lock() {
+        Ok(g) => g,
+        Err(_) => return,
+    };
     let registry = match guard.as_ref() {
         Some(r) => r,
         None => return,

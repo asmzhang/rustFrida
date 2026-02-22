@@ -165,6 +165,62 @@ pub fn cleanup_engine() {
     }
 }
 
+/// Parse a JSON array of strings using a simple state machine.
+/// Correctly handles `\"` and `\\` escape sequences inside string values.
+/// Returns an empty vec on any parse error.
+fn parse_json_string_array(json: &str) -> Vec<String> {
+    let mut result = Vec::new();
+    let mut chars = json.chars().peekable();
+
+    // Consume leading whitespace and '['
+    loop {
+        match chars.peek() {
+            Some(&c) if c.is_whitespace() || c == '[' => { chars.next(); }
+            _ => break,
+        }
+    }
+
+    loop {
+        // Skip whitespace and commas between elements
+        loop {
+            match chars.peek() {
+                Some(&c) if c.is_whitespace() || c == ',' => { chars.next(); }
+                _ => break,
+            }
+        }
+
+        match chars.peek() {
+            None | Some(&']') => break,
+            Some(&'"') => {
+                chars.next(); // consume opening '"'
+                let mut s = String::new();
+                loop {
+                    match chars.next() {
+                        None => break, // malformed input
+                        Some('\\') => match chars.next() {
+                            Some('"') => s.push('"'),
+                            Some('\\') => s.push('\\'),
+                            Some('n') => s.push('\n'),
+                            Some('r') => s.push('\r'),
+                            Some('t') => s.push('\t'),
+                            Some(c) => { s.push('\\'); s.push(c); }
+                            None => break,
+                        },
+                        Some('"') => break, // end of string
+                        Some(c) => s.push(c),
+                    }
+                }
+                if !s.is_empty() {
+                    result.push(s);
+                }
+            }
+            _ => { chars.next(); } // skip unexpected characters
+        }
+    }
+
+    result
+}
+
 /// Get completion candidates for a given prefix from the global JS engine.
 ///
 /// Supports dot notation: if `prefix` contains a `.` (e.g. `"console.l"` or
@@ -259,26 +315,11 @@ pub fn complete_script(prefix: &str) -> Vec<String> {
     };
     result.free(engine.context().as_ptr());
 
-    // Parse the JSON array manually (avoid pulling in serde just for this)
-    let trimmed = json_str
-        .trim()
-        .trim_start_matches('[')
-        .trim_end_matches(']');
-    if trimmed.is_empty() {
-        return vec![];
-    }
-
+    // Parse the JSON array using a state machine to correctly handle escape sequences
+    // (split(',') would break on property names containing escaped quotes or backslashes)
     let prop_lower = prop_prefix.to_lowercase();
-    let mut candidates: Vec<String> = trimmed
-        .split(',')
-        .filter_map(|s| {
-            let s = s.trim().trim_matches('"');
-            if s.is_empty() {
-                None
-            } else {
-                Some(s.to_string())
-            }
-        })
+    let mut candidates: Vec<String> = parse_json_string_array(&json_str)
+        .into_iter()
         .filter(|name| name.to_lowercase().starts_with(&prop_lower))
         .collect();
 

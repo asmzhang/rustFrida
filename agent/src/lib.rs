@@ -723,11 +723,18 @@ pub extern "C" fn hello_entry(string_table: *mut c_void) -> *mut c_void {
 fn process_cmd(command: &str) {
     match command.split_whitespace().next() {
         Some("trace") => {
-            let tid = command
+            let tid = match command
                 .split_whitespace()
                 .nth(1)
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
+                .and_then(|s| s.parse::<usize>().ok())
+                .filter(|&t| t != 0)
+            {
+                Some(t) => t,
+                None => {
+                    log_msg("[trace] 用法: trace <tid>，tid 不能为 0\n".to_string());
+                    return;
+                }
+            };
             std::thread::spawn(move || {
                 match trace::gum_modify_thread(tid) {
                     Ok(pid) => {

@@ -517,7 +517,7 @@ pub fn transformer_global(addr: usize) -> Result<usize> {
         }
 
         INSTRUCT_PTR.store(addr as *mut u32, Ordering::Release);
-        let closure_result = {
+        let closure_result: Result<()> = {
             while !is_arm64_branch(*INSTRUCT_PTR.load(Ordering::Acquire)) {
                 let cur = INSTRUCT_PTR.load(Ordering::Acquire);
                 relocater::relocate_one_a64(
@@ -531,9 +531,11 @@ pub fn transformer_global(addr: usize) -> Result<usize> {
         match closure_result {
             Ok(_) => {}
             Err(e) => {
-                GLOBAL_STREAM.get().unwrap().write_all(e).unwrap();
+                if let Some(mut stream) = GLOBAL_STREAM.get() {
+                    let _ = stream.write_all(e.as_bytes());
+                }
                 exe_mem.reset();
-                transformer_global(addr);
+                return Err(e);
             }
         }
 

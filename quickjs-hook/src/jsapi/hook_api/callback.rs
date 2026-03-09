@@ -1,7 +1,7 @@
 //! Hook callback wrapper (cross-thread safety, context building) — replace mode
 //!
 //! The thunk saves context and calls on_enter, then restores x0 and returns.
-//! The callback can optionally call the original function via callOriginal().
+//! The callback can optionally call the original function via orig().
 
 use crate::ffi;
 use crate::ffi::hook as hook_ffi;
@@ -58,7 +58,7 @@ pub(crate) unsafe extern "C" fn hook_callback_wrapper(
         &callback_bytes,
         "hook",
         target_addr,
-        // 构建 JS 上下文对象：x0-x30, sp, pc, trampoline, callOriginal()
+        // 构建 JS 上下文对象：x0-x30, sp, pc, trampoline, orig()
         |ctx| {
             let js_ctx = ffi::JS_NewObject(ctx);
             let hook_ctx = &*ctx_ptr;
@@ -71,10 +71,10 @@ pub(crate) unsafe extern "C" fn hook_callback_wrapper(
             set_js_u64_property(ctx, js_ctx, "pc", hook_ctx.pc);
             set_js_u64_property(ctx, js_ctx, "trampoline", trampoline);
 
-            let cname = CString::new("callOriginal").unwrap();
+            let cname = CString::new("orig").unwrap();
             let func_val =
                 ffi::qjs_new_cfunction(ctx, Some(js_native_call_original), cname.as_ptr(), 0);
-            JSValue(js_ctx).set_property(ctx, "callOriginal", JSValue(func_val));
+            JSValue(js_ctx).set_property(ctx, "orig", JSValue(func_val));
 
             js_ctx
         },
@@ -98,7 +98,7 @@ pub(crate) unsafe extern "C" fn hook_callback_wrapper(
     CURRENT_NATIVE_TRAMPOLINE.store(0, Ordering::Relaxed);
 }
 
-/// JS CFunction: ctx.callOriginal()
+/// JS CFunction: ctx.orig()
 /// Restores registers from HookContext and calls the trampoline (original function).
 /// Returns the result as BigUint64, also writes it to ctx.x[0].
 unsafe extern "C" fn js_native_call_original(
@@ -113,7 +113,7 @@ unsafe extern "C" fn js_native_call_original(
     if ctx_ptr.is_null() || trampoline == 0 {
         return ffi::JS_ThrowInternalError(
             ctx,
-            b"callOriginal() can only be called inside a hook callback\0".as_ptr() as *const _,
+            b"orig() can only be called inside a hook callback\0".as_ptr() as *const _,
         );
     }
 

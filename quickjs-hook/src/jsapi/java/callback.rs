@@ -1017,7 +1017,7 @@ unsafe fn build_jargs_from_registers(
     jargs
 }
 
-/// JS CFunction: ctx.callOriginal() or ctx.callOriginal(arg0, arg1, ...)
+/// JS CFunction: ctx.orig() or ctx.orig(arg0, arg1, ...)
 ///
 /// No arguments: invokes the clone with the original register arguments.
 /// With arguments: invokes the clone with user-specified arguments (JS → jvalue conversion).
@@ -1056,7 +1056,7 @@ unsafe extern "C" fn js_call_original(
     if ctx_ptr.is_null() || art_method_addr == 0 {
         return ffi::JS_ThrowInternalError(
             ctx,
-            b"callOriginal() can only be called inside a hook callback\0".as_ptr() as *const _,
+            b"orig() can only be called inside a hook callback\0".as_ptr() as *const _,
         );
     }
 
@@ -1079,7 +1079,7 @@ unsafe extern "C" fn js_call_original(
             None => {
                 return ffi::JS_ThrowInternalError(
                     ctx,
-                    b"callOriginal: hook registry not initialized\0".as_ptr() as *const _,
+                    b"orig: hook registry not initialized\0".as_ptr() as *const _,
                 );
             }
         };
@@ -1088,7 +1088,7 @@ unsafe extern "C" fn js_call_original(
             None => {
                 return ffi::JS_ThrowInternalError(
                     ctx,
-                    b"callOriginal: hook data not found\0".as_ptr() as *const _,
+                    b"orig: hook data not found\0".as_ptr() as *const _,
                 );
             }
         };
@@ -1106,7 +1106,7 @@ unsafe extern "C" fn js_call_original(
     if clone_addr == 0 {
         return ffi::JS_ThrowInternalError(
             ctx,
-            b"callOriginal: no ArtMethod clone available\0".as_ptr() as *const _,
+            b"orig: no ArtMethod clone available\0".as_ptr() as *const _,
         );
     }
 
@@ -1118,7 +1118,7 @@ unsafe extern "C" fn js_call_original(
         if e.is_null() {
             return ffi::JS_ThrowInternalError(
                 ctx,
-                b"callOriginal: JNIEnv* is null\0".as_ptr() as *const _,
+                b"orig: JNIEnv* is null\0".as_ptr() as *const _,
             );
         }
         e
@@ -1367,7 +1367,7 @@ pub(super) unsafe extern "C" fn java_hook_callback(
         &callback_bytes,
         "java hook",
         art_method_addr,
-        // 构建 JS 上下文对象：thisObj, args[], env, callOriginal()
+        // 构建 JS 上下文对象：thisObj, args[], env, orig()
         |ctx| {
             let js_ctx = ffi::JS_NewObject(ctx);
             let hook_ctx = &*ctx_ptr;
@@ -1404,7 +1404,7 @@ pub(super) unsafe extern "C" fn java_hook_callback(
                 JSValue(js_ctx).set_property(ctx, "env", JSValue(val));
             }
 
-            // Bind per-callback state to the JS context object so callOriginal()
+            // Bind per-callback state to the JS context object so orig()
             // remains valid across nested hook callbacks and JS-side wrappers.
             {
                 let val = ffi::JS_NewBigUint64(ctx, ctx_ptr as usize as u64);
@@ -1415,12 +1415,12 @@ pub(super) unsafe extern "C" fn java_hook_callback(
                 JSValue(js_ctx).set_property(ctx, "__hookArtMethod", JSValue(val));
             }
 
-            // callOriginal()
+            // orig()
             {
-                let cname = CString::new("callOriginal").unwrap();
+                let cname = CString::new("orig").unwrap();
                 let func_val =
                     ffi::qjs_new_cfunction(ctx, Some(js_call_original), cname.as_ptr(), 0);
-                JSValue(js_ctx).set_property(ctx, "callOriginal", JSValue(func_val));
+                JSValue(js_ctx).set_property(ctx, "orig", JSValue(func_val));
             }
 
             js_ctx

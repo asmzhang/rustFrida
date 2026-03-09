@@ -349,9 +349,9 @@
                             }
                         }
                     }
-                    // Wrap callOriginal so returned objects auto-convert to JS Proxy
-                    var origCallOriginal = ctx.callOriginal;
-                    ctx.callOriginal = function() {
+                    // Wrap orig so returned objects auto-convert to JS Proxy
+                    var origCallOriginal = ctx.orig;
+                    ctx.orig = function() {
                         var ret = origCallOriginal.apply(ctx, arguments);
                         if (ret !== null && typeof ret === "object"
                             && ret.__jptr !== undefined) {
@@ -436,7 +436,7 @@
                 }
 
                 // 执行所有排队的回调 — 用户可在此安装 hook
-                // 注意：用户可能重新 hook newApplication，所以先保存 callOriginal 引用
+                // 注意：用户可能重新 hook newApplication，所以先保存 orig 引用
                 _readyFired = true;
                 var cbs = _readyCallbacks;
                 _readyCallbacks = [];
@@ -449,7 +449,7 @@
                 }
 
                 // 调用原始方法 — app 继续 (attachBaseContext, onCreate 等)
-                return ctx.callOriginal();
+                return ctx.orig();
             });
         }
 

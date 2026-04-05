@@ -45,6 +45,11 @@ which = "7"
 [profile.release]
 strip = true
 
+panic = "abort"          # 禁止异常展开，消除 panic 回溯路径与冗余机制
+lto = true               # 开启链接时优化，剥除跨模块调用图和无用代码
+opt-level = "z"          # 优化体积，混淆普通优化特征
+codegen-units = 1        # 极限单包编译，提升 lto 精度并减少中间生成物碎片
+
 [profile.dev]
 strip = false
 debug = 2

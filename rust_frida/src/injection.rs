@@ -430,32 +430,52 @@ fn run_loader_handshake(ctrl_fd: RawFd, target_pid: i32) -> Result<RawFd, String
     let thread_id = i32::from_le_bytes(tid_buf);
     log_verbose!("Loader worker tid: {}", thread_id);
 
-    // 2. 发送 agent SO fd (创建 memfd → 写入 AGENT_SO → sendmsg)
-    //    关键: 必须设置 SELinux label 为 frida_memfd (带 mlstrustedobject 属性)，
-    //    否则 untrusted_app 因 MLS 分类不匹配无法通过 SCM_RIGHTS 接收 tmpfs fd。
-    let agent_memfd = unsafe { libc::memfd_create(b"wwb_so\0".as_ptr() as _, 0) };
-    if agent_memfd < 0 {
-        return Err(format!("memfd_create 失败: {}", std::io::Error::last_os_error()));
-    }
-    // relabel memfd：匹配目标进程的 MLS categories，绕过 MLS/MCS 检查
-    relabel_fd_for_injection(agent_memfd, target_pid);
-    let mut written = 0usize;
-    while written < AGENT_SO.len() {
-        let n = unsafe {
-            libc::write(
-                agent_memfd,
-                AGENT_SO[written..].as_ptr() as *const c_void,
-                AGENT_SO.len() - written,
-            )
-        };
-        if n <= 0 {
-            unsafe { close(agent_memfd) };
-            return Err("写入 agent SO 到 memfd 失败".to_string());
+    // 2. 发送 agent SO fd
+    // 使用文件落地模式 (Option 1) 突破 Android 10+ Linker memfd 限制
+    let target_uid = std::fs::metadata(format!("/proc/{}", target_pid))
+        .map(|m| { std::os::unix::fs::MetadataExt::uid(&m) })
+        .unwrap_or(0);
+        
+    let app_dir = find_data_dir_by_uid(target_uid).unwrap_or_else(|| "/data/local/tmp".to_string());
+    let drop_path = format!("{}/rustfrida_agent_{}.so", app_dir, target_pid);
+    
+    log_verbose!("利用落地模式，写入 Agent 至: {}", drop_path);
+    
+    let agent_fd = match std::fs::File::create(&drop_path) {
+        Ok(mut f) => {
+            use std::io::Write;
+            if let Err(e) = f.write_all(&AGENT_SO) {
+                return Err(format!("写入 {} 失败: {}", drop_path, e));
+            }
+            std::os::unix::io::IntoRawFd::into_raw_fd(f)
         }
-        written += n as usize;
+        Err(e) => return Err(format!("创建 {} 失败: {}", drop_path, e)),
+    };
+    
+    // 设置权限与 SELinux label
+    unsafe {
+        libc::fchmod(agent_fd, 0o755);
+        let mls = read_target_mls_range(target_pid).unwrap_or_else(|| "s0".to_string());
+        let label = format!("u:object_r:app_data_file:{}\0", mls);
+        libc::fsetxattr(
+            agent_fd,
+            b"security.selinux\0".as_ptr() as *const libc::c_char,
+            label.as_ptr() as *const c_void,
+            label.len() - 1,
+            0,
+        );
+        // 重要：重新以 O_RDONLY 模式打开，防范 ETXTBSY 并且避免 Linker 安全约束
+        let drop_cstr = std::ffi::CString::new(drop_path).unwrap();
+        let agent_fd_ro = libc::open(drop_cstr.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC);
+        libc::close(agent_fd);
+        
+        if agent_fd_ro < 0 {
+            return Err("重新打开只读 agent SO 失败".to_string());
+        }
+        
+        send_fd(ctrl_fd, agent_fd_ro)?;
+        libc::close(agent_fd_ro);
     }
-    send_fd(ctrl_fd, agent_memfd)?;
-    unsafe { close(agent_memfd) };
     log_verbose!("agent SO fd 已发送 ({} bytes)", AGENT_SO.len());
 
     // 3. 创建 REPL socketpair 并发送一端给 loader

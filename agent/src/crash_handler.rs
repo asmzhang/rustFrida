@@ -49,9 +49,9 @@ fn find_map_for_addr(addr: usize, maps: &[MapEntry]) -> Option<&MapEntry> {
     maps.iter().find(|m| addr >= m.start && addr < m.end)
 }
 
-/// 判断是否是 memfd（agent 代码）
-fn is_memfd(name: &String) -> bool {
-    name.contains("memfd:")
+/// 判断是否是 agent 代码（memfd 或文件落地模式）
+fn is_agent_code(name: &String) -> bool {
+    name.contains("memfd:") || name.contains("rustfrida_agent")
 }
 
 // _Unwind_Backtrace 相关定义
@@ -303,7 +303,7 @@ unsafe fn is_crash_in_agent(ucontext: *mut c_void) -> bool {
     if dladdr(pc as *const c_void, &mut info) != 0 && !info.dli_fname.is_null() {
         let fname = CStr::from_ptr(info.dli_fname);
         if let Ok(s) = fname.to_str() {
-            return s.contains("memfd:");
+            return s.contains("memfd:") || s.contains("rustfrida_agent");
         }
     }
     false
@@ -445,7 +445,7 @@ extern "C" fn crash_signal_handler(sig: c_int, info: *mut siginfo_t, ucontext: *
                 if let Some(map) = mdmap.find(addr as u64) {
                     let offset = addr - map.range().base_address().0 as usize;
                     let mdname = map.name();
-                    if is_memfd(&mdname) {
+                    if is_agent_code(&mdname) {
                         crash_msg.push_str(&format!(" (memfd+0x{:x})", offset));
                     } else {
                         let lib_name = mdname.rsplit('/').next().unwrap_or(mdname.as_str());
@@ -468,14 +468,14 @@ extern "C" fn crash_signal_handler(sig: c_int, info: *mut siginfo_t, ucontext: *
 
                 match (lib_name, sym_name) {
                     (Some(lib), Some(sym)) => {
-                        if is_memfd(&lib) {
+                        if is_agent_code(&lib) {
                             crash_msg.push_str(&format!(" (memfd) {}+0x{:x}", sym, offset));
                         } else {
                             crash_msg.push_str(&format!(" {} ({}+0x{:x})", lib, sym, offset));
                         }
                     }
                     (Some(lib), None) => {
-                        if is_memfd(&lib) {
+                        if is_agent_code(&lib) {
                             crash_msg.push_str(&format!(" (memfd+0x{:x})", offset));
                         } else {
                             crash_msg.push_str(&format!(" {} +0x{:x}", lib, offset));

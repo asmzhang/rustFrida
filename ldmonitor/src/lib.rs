@@ -3,15 +3,12 @@
 //! This library provides functionality to monitor `android_dlopen_ext` calls
 //! using eBPF uprobes.
 
-use aya::{maps::perf::PerfEventArray, programs::UProbe, util::online_cpus, Ebpf};
-use bytes::BytesMut;
 use log::debug;
 use std::fs;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
-use tokio::io::unix::AsyncFd;
 use tokio::runtime::Runtime;
 
 pub use ldmonitor_common::{DlopenEvent, MAX_PATH_LEN};
@@ -217,61 +214,105 @@ impl DlopenMonitor {
     }
 }
 
+/// 从 /proc/uptime 读取内核运行秒数作为时间戳基线
+fn get_kernel_uptime() -> f64 {
+    if let Ok(content) = fs::read_to_string("/proc/uptime") {
+        if let Some(first) = content.split_whitespace().next() {
+            return first.parse::<f64>().unwrap_or(0.0);
+        }
+    }
+    0.0
+}
+
+/// 从 dmesg 行中提取内核时间戳（格式: "[  123.456789] ..."）
+fn parse_dmesg_timestamp(line: &str) -> Option<f64> {
+    let start = line.find('[')? + 1;
+    let end = line.find(']')?;
+    line[start..end].trim().parse::<f64>().ok()
+}
+
 async fn run_monitor(
-    target_pid: Option<u32>,
+    _target_pid: Option<u32>,
     sender: Sender<DlopenInfo>,
     stop_flag: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
-    let mut ebpf = Ebpf::load(aya::include_bytes_aligned!(concat!(env!("OUT_DIR"), "/ldmonitor")))?;
+    use tokio::io::{AsyncBufReadExt, BufReader};
+    use tokio::process::Command;
+    use std::process::Stdio;
 
-    let program: &mut UProbe = ebpf.program_mut("ldmonitor").unwrap().try_into()?;
-    program.load()?;
-    program.attach(
-        Some("android_dlopen_ext"),
-        0, // offset
-        "/apex/com.android.runtime/lib64/bionic/libdl.so",
-        target_pid.map(|p| p as i32),
-    )?;
+    log::info!("Starting KPM dmesg log streaming backend...");
 
-    let mut perf_array = PerfEventArray::try_from(ebpf.take_map("EVENTS").unwrap())?;
+    // 记录启动基线：只接受此时间戳之后的 dmesg 行，过滤旧日志
+    let baseline = get_kernel_uptime();
+    log::info!("dmesg baseline uptime: {:.3}s", baseline);
 
-    let cpus = online_cpus().map_err(|(s, e)| anyhow::anyhow!("{}: {}", s, e))?;
-    for cpu_id in cpus {
-        let buf = perf_array.open(cpu_id, None)?;
-        let sender_clone = sender.clone();
-        let stop_flag_clone = stop_flag.clone();
+    let mut child = Command::new("dmesg")
+        .arg("-w")
+        .stdout(Stdio::piped())
+        .spawn()?;
 
-        tokio::spawn(async move {
-            let mut async_fd = AsyncFd::new(buf).unwrap();
-            let mut buffers = (0..10)
-                .map(|_| BytesMut::with_capacity(core::mem::size_of::<DlopenEvent>()))
-                .collect::<Vec<_>>();
+    let stdout = child.stdout.take().unwrap();
+    let mut reader = BufReader::new(stdout).lines();
 
-            loop {
-                if stop_flag_clone.load(Ordering::SeqCst) {
-                    return;
-                }
+    loop {
+        if stop_flag.load(Ordering::SeqCst) {
+            let _ = child.kill().await;
+            break;
+        }
 
-                let mut guard = async_fd.readable_mut().await.unwrap();
-                let events = guard.get_inner_mut().read_events(&mut buffers).unwrap();
-                for buf in buffers.iter().take(events.read) {
-                    let event = unsafe { &*(buf.as_ptr() as *const DlopenEvent) };
-                    let info = DlopenInfo::from(event);
-                    if sender_clone.send(info).is_err() {
-                        return; // receiver dropped
+        match reader.next_line().await {
+            Ok(Some(line)) => {
+                // 过滤旧日志：跳过时间戳早于基线的行
+                if let Some(ts) = parse_dmesg_timestamp(&line) {
+                    if ts < baseline {
+                        continue;
                     }
                 }
-                guard.clear_ready();
+
+                // Parse line format: "[KPM-DLOPEN] | PID:1234 | UID:10200 | PATH:/data/app/..."
+                if line.contains("[KPM-DLOPEN]") && line.contains("PATH:") {
+                    let mut pid: u32 = 0;
+                    let mut uid: u32 = 0;
+                    let mut path = String::new();
+
+                    for part in line.split('|') {
+                        let part = part.trim();
+                        if let Some(rest) = part.strip_prefix("PID:") {
+                            pid = rest.trim().parse().unwrap_or(0);
+                        } else if let Some(rest) = part.strip_prefix("UID:") {
+                            uid = rest.trim().parse().unwrap_or(0);
+                        } else if let Some(rest) = part.strip_prefix("PATH:") {
+                            path = rest.trim().to_string();
+                        }
+                    }
+
+                    if pid > 0 && !path.is_empty() {
+                        // 验证进程仍然存活，避免旧 PID 导致注入失败
+                        let proc_path = format!("/proc/{}", pid);
+                        if !std::path::Path::new(&proc_path).exists() {
+                            log::warn!("跳过已失效的 PID {}: {}", pid, path);
+                            continue;
+                        }
+
+                        let info = DlopenInfo {
+                            host_pid: pid,
+                            ns_pid: None,
+                            uid,
+                            path,
+                        };
+                        if sender.send(info).is_err() {
+                            break; // receiver dropped
+                        }
+                    }
+                }
             }
-        });
+            Ok(None) => break, // EOF
+            Err(e) => {
+                log::error!("Error reading dmesg output: {}", e);
+                break;
+            }
+        }
     }
 
-    // 等待停止信号
-    while !stop_flag.load(Ordering::SeqCst) {
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-    }
-
-    // eBPF 程序在 ebpf 变量 drop 时自动卸载
-    drop(ebpf);
     Ok(())
 }

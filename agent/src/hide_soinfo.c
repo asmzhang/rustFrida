@@ -294,11 +294,20 @@ static void hide_from_solist(void) {
         count++;
         const char *path = get_path(cur);
 
-        if (path && strstr(path, "wwb_so")) {
+        if (path && (strstr(path, "wwb_so") || strstr(path, "rustfrida_agent"))) {
             g_hide_result.target_ptr = (uint64_t)cur;
             strncpy(g_hide_result.target_path, path, sizeof(g_hide_result.target_path) - 1);
 
-            /* 1. 从 soinfo 链表摘除（dl_iterate_phdr 使用此链表） */
+            /* 文件落地模式 (rustfrida_agent)：路径看起来像正常 .so，
+             * 不需要隐藏，且在 dlopen 的 .init_array 阶段调用
+             * solist_remove_soinfo 会导致崩溃。仅记录不摘除。 */
+            if (strstr(path, "rustfrida_agent")) {
+                g_hide_result.entries_scanned = count;
+                g_hide_result.status = 2; /* 2 = detected but skipped */
+                return;
+            }
+
+            /* memfd 模式 (wwb_so)：路径异常，需要摘除 */
             do_remove(cur);
 
             /* 2. 从 _r_debug.r_map link_map 双向链表摘除
@@ -324,7 +333,7 @@ static void hide_from_solist(void) {
                 };
                 struct link_map_entry *lm = (struct link_map_entry *)(*r_map_ptr);
                 while (lm) {
-                    if (lm->l_name && strstr(lm->l_name, "wwb_so")) {
+                    if (lm->l_name && (strstr(lm->l_name, "wwb_so") || strstr(lm->l_name, "rustfrida_agent"))) {
                         /* 从双向链表摘除 */
                         if (lm->l_prev)
                             lm->l_prev->l_next = lm->l_next;

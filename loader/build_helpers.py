@@ -20,46 +20,54 @@ HELPERS_DIR = os.path.join(SCRIPT_DIR, "helpers")
 BUILD_DIR = os.path.join(SCRIPT_DIR, "build")
 
 # Android NDK setup
-NDK_BASE = os.path.expanduser("~/Android/Sdk/ndk")
-
 def find_ndk():
-    """Find the latest Android NDK."""
-    if not os.path.isdir(NDK_BASE):
-        print(f"错误: NDK 目录不存在: {NDK_BASE}")
-        sys.exit(1)
-    versions = sorted(os.listdir(NDK_BASE), reverse=True)
-    if not versions:
-        print("错误: 未找到 NDK 版本")
-        sys.exit(1)
-    return os.path.join(NDK_BASE, versions[0])
+    """Find the latest Android NDK using env variables."""
+    candidates = []
+    for env_name in ("ANDROID_NDK_ROOT", "ANDROID_NDK_HOME"):
+        env_value = os.environ.get(env_name)
+        if env_value:
+            parent_dir = os.path.dirname(os.path.normpath(env_value))
+            if os.path.basename(parent_dir) == "ndk":
+                versions = sorted([d for d in os.listdir(parent_dir) if os.path.isdir(os.path.join(parent_dir, d))], reverse=True)
+                ndk_25 = [v for v in versions if "25." in v]
+                candidates.extend([os.path.join(parent_dir, v) for v in ndk_25])
+            candidates.append(env_value)
+    android_home = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+    if android_home:
+        ndk_dir = os.path.join(android_home, "ndk")
+        if os.path.isdir(ndk_dir):
+            versions = sorted([d for d in os.listdir(ndk_dir) if os.path.isdir(os.path.join(ndk_dir, d))], reverse=True)
+            ndk_25 = [v for v in versions if "25." in v]
+            others = [v for v in versions if "25." not in v]
+            candidates.extend([os.path.join(ndk_dir, v) for v in ndk_25 + others])
+    for candidate in candidates:
+        if os.path.isdir(os.path.join(candidate, "toolchains", "llvm", "prebuilt")):
+            return candidate
+    print("错误: 未能在环境变量 ANDROID_NDK_HOME 或 ANDROID_HOME 中找到 NDK")
+    sys.exit(1)
 
 def find_tool(ndk_path, tool):
     """Find an NDK tool in the toolchain."""
-    toolchain = os.path.join(ndk_path, "toolchains", "llvm", "prebuilt", "linux-x86_64", "bin")
-    # Try llvm- prefixed first
-    llvm_tool = os.path.join(toolchain, f"llvm-{tool}")
-    if os.path.isfile(llvm_tool):
-        return llvm_tool
-    # Try aarch64- prefixed
-    aarch64_tool = os.path.join(toolchain, f"aarch64-linux-android-{tool}")
-    if os.path.isfile(aarch64_tool):
-        return aarch64_tool
+    for host in ["windows-x86_64", "linux-x86_64", "darwin-x86_64", "darwin-arm64"]:
+        toolchain = os.path.join(ndk_path, "toolchains", "llvm", "prebuilt", host, "bin")
+        if not os.path.isdir(toolchain): continue
+        exe_ext = ".exe" if "windows" in host else ""
+        llvm_tool = os.path.join(toolchain, f"llvm-{tool}{exe_ext}")
+        if os.path.isfile(llvm_tool): return llvm_tool
+        aarch_tool = os.path.join(toolchain, f"aarch64-linux-android-{tool}{exe_ext}")
+        if os.path.isfile(aarch_tool): return aarch_tool
     return None
 
 def find_clang(ndk_path, api=33):
     """Find the NDK clang for aarch64."""
-    toolchain = os.path.join(ndk_path, "toolchains", "llvm", "prebuilt", "linux-x86_64", "bin")
-    clang = os.path.join(toolchain, f"aarch64-linux-android{api}-clang")
-    if os.path.isfile(clang):
-        return clang
-    # Fallback without API version
-    clang = os.path.join(toolchain, "aarch64-linux-android-clang")
-    if os.path.isfile(clang):
-        return clang
-    # Try plain clang
-    clang = os.path.join(toolchain, "clang")
-    if os.path.isfile(clang):
-        return clang
+    for host in ["windows-x86_64", "linux-x86_64", "darwin-x86_64", "darwin-arm64"]:
+        toolchain = os.path.join(ndk_path, "toolchains", "llvm", "prebuilt", host, "bin")
+        if not os.path.isdir(toolchain): continue
+        exe_ext = ".cmd" if "windows" in host else ""
+        clang = os.path.join(toolchain, f"aarch64-linux-android{api}-clang{exe_ext}")
+        if os.path.isfile(clang): return clang
+        clang = os.path.join(toolchain, f"clang{exe_ext}")
+        if os.path.isfile(clang): return clang
     return None
 
 def run_cmd(cmd, desc=""):

@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::communication::write_stream;
+use crate::net::communication::write_stream;
 
 /// 最终结果：是否真的改写了立即数；若超范围则原样写回并提示。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

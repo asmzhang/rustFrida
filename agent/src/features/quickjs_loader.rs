@@ -5,7 +5,7 @@
 
 #![cfg(feature = "quickjs")]
 
-use crate::vma_name::set_anon_vma_name_raw;
+use crate::sys::vma_name::set_anon_vma_name_raw;
 use libc::{munmap, sysconf, MAP_FAILED, _SC_PAGESIZE};
 
 use quickjs_hook::{
@@ -18,7 +18,7 @@ use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 
-use crate::communication::{log_msg, write_stream};
+use crate::net::communication::{log_msg, write_stream};
 
 static ENGINE_INITIALIZED: AtomicBool = AtomicBool::new(false);
 static HOOK_EXEC_VMA_NAME: &[u8] = b"wwb_hook_exec\0";
@@ -112,10 +112,10 @@ pub fn init() -> Result<(), String> {
     init_hook_engine(exec_mem.as_ptr(), exec_mem.size())?;
 
     // 注册 recomp handlers
-    quickjs_hook::recomp::set_handler(|addr| crate::recompiler::ensure_and_translate(addr));
-    quickjs_hook::recomp::set_alloc_slot_handler(|addr| crate::recompiler::alloc_trampoline_slot(addr));
-    quickjs_hook::recomp::set_fixup_handler(|trampoline, addr| crate::recompiler::fixup_slot_trampoline(trampoline, addr));
-    quickjs_hook::recomp::set_commit_handler(|addr| crate::recompiler::commit_slot_patch(addr));
+    quickjs_hook::recomp::set_handler(|addr| crate::engine::recompiler::ensure_and_translate(addr));
+    quickjs_hook::recomp::set_alloc_slot_handler(|addr| crate::engine::recompiler::alloc_trampoline_slot(addr));
+    quickjs_hook::recomp::set_fixup_handler(|trampoline, addr| crate::engine::recompiler::fixup_slot_trampoline(trampoline, addr));
+    quickjs_hook::recomp::set_commit_handler(|addr| crate::engine::recompiler::commit_slot_patch(addr));
 
     if let Some(output_path) = crate::OUTPUT_PATH.get() {
         set_qbdi_output_dir(output_path.clone());
@@ -197,6 +197,6 @@ pub fn cleanup() {
     // 必须在所有 hook cleanup 之后: OAT patch restore 需要写 recomp 页，
     // hook_engine_cleanup 恢复 slot 原始字节也在 recomp 跳板区。
     // 不 munmap: 其他线程 icache 可能仍有 recomp 页指令。
-    crate::recompiler::release_all();
+    crate::engine::recompiler::release_all();
     log_msg("[quickjs] cleanup done\n".to_string());
 }

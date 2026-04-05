@@ -5,7 +5,7 @@
 //! 如果不 chain，app 在触发 ART 隐式 null check 时会直接崩溃，
 //! 而不是正常抛出 NullPointerException。
 
-use crate::communication::{log_msg, write_stream_raw};
+use crate::net::communication::{log_msg, write_stream_raw};
 use libc::{
     c_char, c_int, c_void, sigaction, siginfo_t, SA_ONSTACK, SA_SIGINFO, SIGABRT, SIGBUS, SIGFPE, SIGILL, SIGSEGV,
     SIGTRAP,

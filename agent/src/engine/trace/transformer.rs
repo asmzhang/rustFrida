@@ -2,10 +2,10 @@ use super::arm64_analysis::{is_arm64_branch, is_arm64_call, resolve_next_addr};
 use super::arm64_codegen::{gen_jump_to_transformer, gen_mov_reg_addr};
 use super::ptrace_ops::{attach_to_thread, get_registers, set_reg};
 use super::UserRegs;
-use crate::arm64_relocator;
-use crate::communication::write_stream;
-use crate::exec_mem::ExecMem;
-use crate::gumlibc::gum_libc_ptrace;
+use crate::engine::arm64_relocator;
+use crate::net::communication::write_stream;
+use crate::engine::exec_mem::ExecMem;
+use crate::sys::gumlibc::gum_libc_ptrace;
 use libc::{
     c_int, mmap, pid_t, CLONE_SETTLS, CLONE_VM, MAP_ANONYMOUS, MAP_PRIVATE, PROT_READ, PROT_WRITE, PTRACE_DETACH,
 };
@@ -100,7 +100,7 @@ pub fn gum_modify_thread(thread_id: usize) -> Result<pid_t> {
             0,
         )
     };
-    let _ = crate::vma_name::set_anon_vma_name_raw(stack_base as *mut u8, 0x1100000, b"wwb_trace_stack\0");
+    let _ = crate::sys::vma_name::set_anon_vma_name_raw(stack_base as *mut u8, 0x1100000, b"wwb_trace_stack\0");
     let stack = unsafe { stack_base.add(0x1100000) };
     let tls = unsafe {
         mmap(
@@ -112,8 +112,8 @@ pub fn gum_modify_thread(thread_id: usize) -> Result<pid_t> {
             0,
         )
     };
-    let _ = crate::vma_name::set_anon_vma_name_raw(tls as *mut u8, 0x1000, b"wwb_trace_tls\0");
-    crate::gumlibc::gum_libc_clone(
+    let _ = crate::sys::vma_name::set_anon_vma_name_raw(tls as *mut u8, 0x1000, b"wwb_trace_tls\0");
+    crate::sys::gumlibc::gum_libc_clone(
         tracer as *mut usize,
         thread_id,
         (CLONE_VM | CLONE_SETTLS) as u64,

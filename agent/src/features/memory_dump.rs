@@ -1,7 +1,7 @@
 //! 内存快照 dump 模块
 #![cfg(feature = "frida-gum")]
 
-use crate::communication::log_msg;
+use crate::net::communication::log_msg;
 use crate::OUTPUT_PATH;
 use prost::Message;
 use std::fs::{File, OpenOptions};

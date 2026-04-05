@@ -1,7 +1,7 @@
 /* frida-gum stalker 功能模块 */
 #![cfg(feature = "frida-gum")]
 
-use crate::communication::{log_msg, write_stream};
+use crate::net::communication::{log_msg, write_stream};
 use crate::OUTPUT_PATH;
 use crossbeam_channel::{bounded, Sender};
 use frida_gum::interceptor::{Interceptor, InvocationContext, InvocationListener, ProbeListener};

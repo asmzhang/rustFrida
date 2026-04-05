@@ -1,5 +1,5 @@
 use super::UserRegs;
-use crate::gumlibc::{gum_libc_ptrace, gum_libc_waitpid};
+use crate::sys::gumlibc::{gum_libc_ptrace, gum_libc_waitpid};
 use libc::{c_void, iovec, pid_t, PTRACE_ATTACH};
 use nix::errno::Errno;
 use std::mem::size_of;

@@ -4,10 +4,11 @@ ARM64 Android 动态插桩框架。
 
 ## 环境要求
 
-- Android NDK 25+（默认路径 `~/Android/Sdk/ndk/`）
+- Android NDK 25+（默认路径 `~/Android/Sdk/ndk/` 或通过环境变量配置）
 - Rust toolchain + `aarch64-linux-android` target
-- Python 3（构建 loader shellcode）
-- `.cargo/config.toml` 已配置交叉编译（仓库自带）
+- Python 3（用于构建流水线）
+- 如果在 Windows 下且使用独立的 LLVM/Clang，必须设置环境变量（如 `$env:LIBCLANG_PATH="C:\\platform\\LLVM\\bin"`）以便 bindgen 定位 `libclang.dll`
+- `.cargo/config.toml` 已配置交叉编译（由 `setup_cargo_config.py` 自动生成）
 
 ## 构建
 
@@ -22,10 +23,14 @@ agent (libagent.so) ┘
 ### 1. 构建 loader shellcode（bootstrapper + rustfrida-loader）
 
 ```bash
-python3 build_helpers.py
+# 如果构建出现 bindgen 找不到 libclang.dll 的错误（invalid: []），请在运行前设置：
+# $env:LIBCLANG_PATH="C:\platform\LLVM\bin" (Windows PowerShell) 或者使用完整版 LLVM 路径。
+python3 build.py
 # 输出:
 #   loader/build/bootstrapper.bin
 #   loader/build/rustfrida-loader.bin
+#   target/aarch64-linux-android/release/libagent.so
+#   target/aarch64-linux-android/release/rustfrida
 ```
 
 loader 是 bare-metal ARM64 shellcode，被 `rustfrida` 通过 `include_bytes!` 嵌入。**修改 loader C 代码后需重新运行此步。**

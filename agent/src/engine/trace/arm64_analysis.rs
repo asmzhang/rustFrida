@@ -1,5 +1,5 @@
 use super::UserRegs;
-use crate::communication::write_stream;
+use crate::net::communication::write_stream;
 
 /// ARM64 分支指令类型
 #[derive(Debug, Clone, Copy)]

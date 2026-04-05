@@ -11,8 +11,8 @@
 //!
 //! 用途：stealth hook — 在重编译页上修改代码，原始页不变。
 
-use crate::communication::log_msg;
-use crate::vma_name::set_anon_vma_name_raw;
+use crate::net::communication::log_msg;
+use crate::sys::vma_name::set_anon_vma_name_raw;
 use libc::{
     mmap, mprotect, munmap, sysconf, MAP_ANONYMOUS, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE,
     _SC_PAGESIZE,

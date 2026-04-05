@@ -359,3 +359,123 @@ pub(crate) fn run_js_repl(session: &Arc<Session>) {
     }
     let _ = rl.save_history(".rustfrida_js_history");
 }
+
+use crate::args::Args;
+use std::sync::atomic::Ordering;
+
+pub(crate) fn run_main_repl(session: &Arc<Session>, args: &Args) {
+    use crate::logger::{DIM, RESET};
+    use crate::communication::send_command;
+    use crate::spawn;
+
+    let mut rl = match Editor::new() {
+        Ok(e) => e,
+        Err(e) => {
+            crate::log_error!("初始化行编辑器失败: {}", e);
+            std::process::exit(1);
+        }
+    };
+    rl.set_helper(Some(CommandCompleter::new()));
+    let _ = rl.load_history(".rustfrida_history");
+    println!("  {DIM}输入 help 查看命令，exit 退出{RESET}");
+
+    let send_shutdown = |s: &Session| {
+        if let Some(sender) = s.get_sender() {
+            if let Err(e) = send_command(sender, "shutdown") {
+                crate::log_error!("发送 shutdown 失败: {}", e);
+            } else {
+                crate::log_info!("已发送 shutdown，等待 agent 主动断开连接...");
+            }
+        }
+    };
+
+    loop {
+        if session.disconnected.load(Ordering::Acquire) {
+            crate::log_error!("Agent 连接已断开，请重新注入");
+            break;
+        }
+
+        if args.spawn.is_some() && spawn::signal_received() {
+            crate::log_info!("收到终止信号，正在退出...");
+            send_shutdown(&session);
+            break;
+        }
+
+        match rl.readline("rustfrida> ") {
+            Ok(line) => {
+                let line = line.trim().to_string();
+                if line.is_empty() {
+                    continue;
+                }
+                let _ = rl.add_history_entry(&line);
+                if line == "help" {
+                    print_help();
+                    continue;
+                }
+                if line == "exit" || line == "quit" {
+                    crate::log_info!("退出交互模式");
+                    send_shutdown(&session);
+                    break;
+                }
+                if line == "jsrepl" {
+                    run_js_repl(&session);
+                    continue;
+                }
+                {
+                    let parts: Vec<&str> = line.split_whitespace().collect();
+                    if matches!(parts.first().copied(), Some("hfl")) && parts.len() < 3 {
+                        crate::log_warn!("用法: {} <module> <offset>", parts[0]);
+                        continue;
+                    }
+                }
+                let is_recomp = line.starts_with("recomp");
+                let is_eval_cmd = line.starts_with("jseval ")
+                    || line.starts_with("loadjs ")
+                    || line == "jsinit"
+                    || line == "jsclean"
+                    || is_recomp;
+                if is_eval_cmd {
+                    session.eval_state.clear();
+                }
+                let sender = match session.get_sender() {
+                    Some(s) => s,
+                    None => break,
+                };
+                match send_command(sender, &line) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        crate::log_error!("发送命令失败: {}", e);
+                        break;
+                    }
+                }
+                if is_eval_cmd {
+                    print_eval_result(&session, if is_recomp { 15 } else { 5 });
+                }
+            }
+            Err(ReadlineError::Interrupted) | Err(ReadlineError::Eof) => {
+                crate::log_info!("退出交互模式");
+                send_shutdown(&session);
+                break;
+            }
+            Err(e) => {
+                crate::log_error!("读取输入失败: {}", e);
+                break;
+            }
+        }
+    }
+
+    let _ = rl.save_history(".rustfrida_history");
+
+    if args.spawn.is_some() {
+        spawn::cleanup_zygote_patches();
+    }
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !session.disconnected.load(Ordering::Acquire) {
+        if std::time::Instant::now() >= deadline {
+            crate::log_warn!("等待 agent 断开超时 (5s)，强制退出");
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}

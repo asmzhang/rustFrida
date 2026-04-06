@@ -1,15 +1,16 @@
 #![cfg(all(target_os = "android", target_arch = "aarch64"))]
 
 use crate::args::Args;
-use crate::communication::{send_command, start_socketpair_handler};
 #[cfg(feature = "qbdi")]
 use crate::communication::send_qbdi_helper;
+use crate::communication::{send_command, start_socketpair_handler};
 use crate::injection::{inject_via_bootstrapper, watch_and_inject};
 use crate::process::find_pid_by_name;
 use crate::repl::{print_eval_result, run_main_repl};
 use crate::session::Session;
 use crate::spawn;
 use crate::types::get_string_table_names;
+#[allow(unused_imports)]
 use crate::{log_error, log_info, log_success, log_warn};
 
 use std::os::unix::io::RawFd;
@@ -97,7 +98,7 @@ pub(crate) fn start_interactive_session(args: &Args) {
     } else {
         "unknown".to_string()
     };
-    
+
     let session = Arc::new(Session::new(0, label));
     if let Some(pid) = target_pid {
         session.pid.store(pid, Ordering::Relaxed);

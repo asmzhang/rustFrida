@@ -10,6 +10,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use crate::communication::send_command;
+#[allow(unused_imports)]
 use crate::log_error;
 use crate::logger::{GRAY, GREEN, HIGHLIGHT_BG, HIGHLIGHT_FG, RED, RESET, YELLOW};
 use crate::session::Session;
@@ -295,9 +296,11 @@ pub(crate) fn run_js_repl(session: &Arc<Session>) {
     // Auto-initialize JS engine: send jsinit and wait for EVAL confirmation.
     // Accept both Ok (just initialized) and Err containing "已初始化" (already was ready).
     {
-        let result = session.eval_state.clear_then_recv(std::time::Duration::from_secs(5), || {
-            let _ = send_command(sender, "jsinit");
-        });
+        let result = session
+            .eval_state
+            .clear_then_recv(std::time::Duration::from_secs(5), || {
+                let _ = send_command(sender, "jsinit");
+            });
         match result {
             None => {
                 log_error!("jsrepl: jsinit 超时，JS 引擎未就绪");
@@ -364,8 +367,8 @@ use crate::args::Args;
 use std::sync::atomic::Ordering;
 
 pub(crate) fn run_main_repl(session: &Arc<Session>, args: &Args) {
-    use crate::logger::{DIM, RESET};
     use crate::communication::send_command;
+    use crate::logger::{DIM, RESET};
     use crate::spawn;
 
     let mut rl = match Editor::new() {

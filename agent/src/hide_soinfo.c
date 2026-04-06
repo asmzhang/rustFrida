@@ -364,3 +364,10 @@ static void hide_from_solist(void) {
     g_hide_result.entries_scanned = count;
     FAIL(-9, "target not found in solist");
 }
+
+/* ========== Compiler Intrinsic Stubs ========== */
+// 兼容较高版本 Android NDK 因删除 libgcc 导致的 __clear_cache 符号缺失
+void __clear_cache(void *begin, void *end) {
+    __builtin___clear_cache(begin, end);
+}
+

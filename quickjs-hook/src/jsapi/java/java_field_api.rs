@@ -548,8 +548,11 @@ unsafe fn write_instance_field(
         Some(b'Z') => {
             type F = unsafe extern "C" fn(JniEnv, *mut std::ffi::c_void, *mut std::ffi::c_void, u8);
             let f: F = jni_fn!(env, F, JNI_SET_BOOLEAN_FIELD);
-            let v = if value.is_bool() { value.to_bool().unwrap_or(false) as u8 }
-                    else { value.to_i64(ctx).map(|n| (n != 0) as u8).unwrap_or(0) };
+            let v = if value.is_bool() {
+                value.to_bool().unwrap_or(false) as u8
+            } else {
+                value.to_i64(ctx).map(|n| (n != 0) as u8).unwrap_or(0)
+            };
             f(env, local_obj, field_id, v);
         }
         Some(b'B') => {
@@ -562,7 +565,9 @@ unsafe fn write_instance_field(
             let f: F = jni_fn!(env, F, JNI_SET_CHAR_FIELD);
             let v = if let Some(s) = value.to_string(ctx) {
                 s.chars().next().map(|c| c as u16).unwrap_or(0)
-            } else { value.to_i64(ctx).unwrap_or(0) as u16 };
+            } else {
+                value.to_i64(ctx).unwrap_or(0) as u16
+            };
             f(env, local_obj, field_id, v);
         }
         Some(b'S') => {

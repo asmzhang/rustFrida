@@ -12,6 +12,7 @@ use std::path::Path;
 use std::process;
 
 use crate::types::{UserFpRegs, UserRegs};
+#[allow(unused_imports)]
 use crate::{log_info, log_success, log_warn};
 
 /// 获取指定库的基址
@@ -122,6 +123,7 @@ pub(crate) fn attach_to_process(pid: i32) -> Result<(), String> {
 }
 
 /// 获取进程寄存器（pub 接口供 code-swap 使用）
+#[allow(dead_code)]
 /// 轮询 /proc/pid/status 等待进程进入 stopped 状态
 pub(crate) fn wait_process_stopped(pid: u32, timeout: std::time::Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;

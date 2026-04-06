@@ -12,8 +12,8 @@ use super::super::art_method::*;
 use super::super::callback::*;
 use super::super::jni_core::*;
 use super::install_support::{
-    create_class_global_ref, create_replacement_art_method,
-    install_per_method_router_hook, update_original_method_flags_for_hook, JavaHookInstallGuard,
+    create_class_global_ref, create_replacement_art_method, install_per_method_router_hook,
+    update_original_method_flags_for_hook, JavaHookInstallGuard,
 };
 
 pub(in crate::jsapi::java) unsafe extern "C" fn js_java_hook(

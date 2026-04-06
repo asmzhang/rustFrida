@@ -7,6 +7,7 @@
 ///
 /// 二进制格式参考 Linux kernel: security/selinux/ss/policydb.c
 /// 关键点：所有整数使用小端序，字符串格式为 [len 在 u32 batch 中, key bytes 在 batch 之后]
+#[allow(unused_imports)]
 use crate::{log_error, log_info, log_success, log_verbose, log_warn};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -69,12 +70,7 @@ const RULES: &[(&str, &str, &str, &[&str])] = &[
     ("system_server", "?apex_art_data_file", "file", &["execute"]),
     // 属性伪装: 允许 domain 在子进程 mount namespace 中执行 bind mount
     // /dev/__properties__/ 类型是 properties_device，不是 tmpfs
-    (
-        "domain",
-        "tmpfs",
-        "filesystem",
-        &["?mount", "?unmount", "?remount"],
-    ),
+    ("domain", "tmpfs", "filesystem", &["?mount", "?unmount", "?remount"]),
     (
         "domain",
         "?properties_device",
@@ -94,12 +90,7 @@ const RULES: &[(&str, &str, &str, &[&str])] = &[
         &["?mounton", "read", "open", "getattr", "search"],
     ),
     // mount 需要 sys_admin capability
-    (
-        "domain",
-        "domain",
-        "capability",
-        &["?sys_admin"],
-    ),
+    ("domain", "domain", "capability", &["?sys_admin"]),
 ];
 
 // ─── 全局状态 ───

@@ -31,10 +31,10 @@ use crate::sys::crash_handler::{install_crash_handlers, install_panic_hook};
 use std::ffi::c_void;
 use std::os::unix::io::FromRawFd;
 use std::os::unix::net::UnixStream;
+use std::ptr::null_mut;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
-use std::ptr::null_mut;
 
 // hide_soinfo.c 中的调试结果函数（.init_array 构造函数填充）
 // 通过 Rust #[no_mangle] 重导出到动态符号表，供 host 端 dlsym 查询
@@ -68,14 +68,20 @@ pub struct StringTable {
 
 impl StringTable {
     unsafe fn read_string(&self, addr: u64, len: u32) -> Option<String> {
-        if addr == 0 || len == 0 { return None; }
+        if addr == 0 || len == 0 {
+            return None;
+        }
         let ptr = addr as *const u8;
         let slice = std::slice::from_raw_parts(ptr, len as usize);
         let end = slice.iter().position(|&c| c == 0).unwrap_or(slice.len());
         String::from_utf8(slice[..end].to_vec()).ok()
     }
-    pub unsafe fn get_cmdline(&self) -> Option<String> { self.read_string(self.cmdline, self.cmdline_len) }
-    pub unsafe fn get_output_path(&self) -> Option<String> { self.read_string(self.output_path, self.output_path_len) }
+    pub unsafe fn get_cmdline(&self) -> Option<String> {
+        self.read_string(self.cmdline, self.cmdline_len)
+    }
+    pub unsafe fn get_output_path(&self) -> Option<String> {
+        self.read_string(self.output_path, self.output_path_len)
+    }
 }
 
 pub static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
@@ -104,10 +110,14 @@ pub extern "C" fn hello_entry(args_ptr: *mut c_void) -> *mut c_void {
 
     unsafe {
         if let Some(output) = table.get_output_path() {
-            if output != "novalue" { let _ = OUTPUT_PATH.set(output.clone()); }
+            if output != "novalue" {
+                let _ = OUTPUT_PATH.set(output.clone());
+            }
         }
         if let Some(cmd) = table.get_cmdline() {
-            if cmd != "novalue" { crate::router::dispatch(&cmd); }
+            if cmd != "novalue" {
+                crate::router::dispatch(&cmd);
+            }
         }
     }
 
@@ -135,7 +145,9 @@ pub extern "C" fn hello_entry(args_ptr: *mut c_void) -> *mut c_void {
                 } else {
                     write_stream(format!("未知 frame kind: {}", kind).as_bytes());
                 }
-                if SHOULD_EXIT.load(Ordering::Relaxed) { break; }
+                if SHOULD_EXIT.load(Ordering::Relaxed) {
+                    break;
+                }
             }
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
             Err(e) => {

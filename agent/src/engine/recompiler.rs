@@ -14,8 +14,7 @@
 use crate::net::communication::log_msg;
 use crate::sys::vma_name::set_anon_vma_name_raw;
 use libc::{
-    mmap, mprotect, munmap, sysconf, MAP_ANONYMOUS, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE,
-    _SC_PAGESIZE,
+    mmap, mprotect, munmap, sysconf, MAP_ANONYMOUS, MAP_PRIVATE, PROT_EXEC, PROT_READ, PROT_WRITE, _SC_PAGESIZE,
 };
 use std::collections::HashMap;
 use std::io::Error;
@@ -202,15 +201,7 @@ pub fn recompile(addr: usize, pid: u32) -> Result<(usize, RecompileStats)> {
     ));
 
     // 注册到内核（pid=0 表示当前进程，内核只接受 0）
-    let prctl_ret = unsafe {
-        libc::prctl(
-            PR_RECOMPILE_REGISTER,
-            0u64,
-            orig_base as u64,
-            recomp_base,
-            0u64,
-        )
-    };
+    let prctl_ret = unsafe { libc::prctl(PR_RECOMPILE_REGISTER, 0u64, orig_base as u64, recomp_base, 0u64) };
 
     let registered = if prctl_ret != 0 {
         log_msg(format!(
@@ -262,13 +253,7 @@ pub fn release(addr: usize, pid: u32) -> Result<()> {
     // 从内核注销（pid=0 表示当前进程）
     if page.registered {
         unsafe {
-            libc::prctl(
-                PR_RECOMPILE_RELEASE,
-                0u64,
-                orig_base as u64,
-                0u64,
-                0u64,
-            );
+            libc::prctl(PR_RECOMPILE_RELEASE, 0u64, orig_base as u64, 0u64, 0u64);
         }
     }
 
@@ -299,13 +284,7 @@ pub fn release_all() {
         if let Some(page) = pages.remove(&orig_base) {
             if page.registered {
                 unsafe {
-                    libc::prctl(
-                        PR_RECOMPILE_RELEASE,
-                        0u64,
-                        orig_base as u64,
-                        0u64,
-                        0u64,
-                    );
+                    libc::prctl(PR_RECOMPILE_RELEASE, 0u64, orig_base as u64, 0u64, 0u64);
                 }
             }
             // 不 munmap: prctl release 后内核恢复原始页 X 权限，
@@ -514,7 +493,14 @@ pub fn alloc_trampoline_slot(orig_addr: usize) -> Result<usize> {
     }
 
     page.tramp_used += slot_size;
-    page.slots.insert(orig_addr, SlotInfo { recomp_addr: recomp_code_addr, slot_addr, orig_insn });
+    page.slots.insert(
+        orig_addr,
+        SlotInfo {
+            recomp_addr: recomp_code_addr,
+            slot_addr,
+            orig_insn,
+        },
+    );
     // 注意: 此时 recomp 代码页上的原始指令未被修改，slot 已分配但内容是 0。
     // 调用方必须在 hook engine 写好 thunk + fixup trampoline 后调用 commit_slot_patch。
     Ok(slot_addr)
@@ -660,10 +646,15 @@ fn do_recompile_temp(orig_base: usize) -> Result<TempRecomp> {
 
         let ret = unsafe {
             recompile_page(
-                orig_code.as_ptr(), orig_base as u64,
-                recomp_ptr, recomp_base,
-                tramp_ptr, tramp_base, tramp_cap,
-                &mut tramp_used, &mut stats,
+                orig_code.as_ptr(),
+                orig_base as u64,
+                recomp_ptr,
+                recomp_base,
+                tramp_ptr,
+                tramp_base,
+                tramp_cap,
+                &mut tramp_used,
+                &mut stats,
             )
         };
 
@@ -679,7 +670,9 @@ fn do_recompile_temp(orig_base: usize) -> Result<TempRecomp> {
             });
         }
 
-        let msg = std::str::from_utf8(&stats.error_msg).unwrap_or("?").trim_end_matches('\0');
+        let msg = std::str::from_utf8(&stats.error_msg)
+            .unwrap_or("?")
+            .trim_end_matches('\0');
         unsafe { munmap(recomp_ptr as *mut _, total_size) };
 
         if !msg.contains("跳板区空间不足") || tramp_pages == MAX_TRAMPOLINE_PAGES {
@@ -705,10 +698,14 @@ pub fn dry_run(addr: usize) -> Result<String> {
     let mut output = format!(
         "orig=0x{:x} recomp=0x{:x} delta=0x{:x}\n\
          copied={} intra={} reloc={} tramp={} tramp_bytes={}\n",
-        orig_base, t.recomp_base,
+        orig_base,
+        t.recomp_base,
         t.recomp_base.wrapping_sub(orig_base as u64),
-        t.stats.num_copied, t.stats.num_intra_page,
-        t.stats.num_direct_reloc, t.stats.num_trampolines, t.tramp_used
+        t.stats.num_copied,
+        t.stats.num_intra_page,
+        t.stats.num_direct_reloc,
+        t.stats.num_trampolines,
+        t.tramp_used
     );
 
     let orig_insns = unsafe { std::slice::from_raw_parts(t.orig_code.as_ptr() as *const u32, 1024) };
@@ -719,7 +716,7 @@ pub fn dry_run(addr: usize) -> Result<String> {
         if orig_insns[i] != recomp_insns[i] {
             let off = i * 4;
             let recomp = recomp_insns[i];
-            let is_b  = (recomp & 0xFC000000) == 0x14000000;
+            let is_b = (recomp & 0xFC000000) == 0x14000000;
             let is_bl = (recomp & 0xFC000000) == 0x94000000;
             if is_b || is_bl {
                 let imm26 = recomp & 0x03FFFFFF;
@@ -727,12 +724,13 @@ pub fn dry_run(addr: usize) -> Result<String> {
                 let target = (t.recomp_base as i64 + off as i64 + (sext as i64) * 4) as u64;
                 output.push_str(&format!(
                     "  +0x{:03x} {:08x} {} 0x{:x}\n",
-                    off, orig_insns[i], if is_bl { "BL" } else { "B " }, target
+                    off,
+                    orig_insns[i],
+                    if is_bl { "BL" } else { "B " },
+                    target
                 ));
             } else {
-                output.push_str(&format!(
-                    "  +0x{:03x} {:08x} → {:08x}\n", off, orig_insns[i], recomp
-                ));
+                output.push_str(&format!("  +0x{:03x} {:08x} → {:08x}\n", off, orig_insns[i], recomp));
             }
             changed += 1;
         }

@@ -72,6 +72,7 @@ impl ExecMemory {
         })
     }
 
+#[allow(unused_variables)]
     fn new(size: usize) -> Option<Self> {
         Self::new_near(size, 0)
     }
@@ -114,7 +115,9 @@ pub fn init() -> Result<(), String> {
     // 注册 recomp handlers
     quickjs_hook::recomp::set_handler(|addr| crate::engine::recompiler::ensure_and_translate(addr));
     quickjs_hook::recomp::set_alloc_slot_handler(|addr| crate::engine::recompiler::alloc_trampoline_slot(addr));
-    quickjs_hook::recomp::set_fixup_handler(|trampoline, addr| crate::engine::recompiler::fixup_slot_trampoline(trampoline, addr));
+    quickjs_hook::recomp::set_fixup_handler(|trampoline, addr| {
+        crate::engine::recompiler::fixup_slot_trampoline(trampoline, addr)
+    });
     quickjs_hook::recomp::set_commit_handler(|addr| crate::engine::recompiler::commit_slot_patch(addr));
 
     if let Some(output_path) = crate::OUTPUT_PATH.get() {

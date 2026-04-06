@@ -1,0 +1,6 @@
+id=@PROP_ID@
+name=@PROP_NAME@
+version=@PROP_VERSION@
+versionCode=@PROP_VERSION_CODE@
+author=@PROP_AUTHOR@
+description=@PROP_DESC@

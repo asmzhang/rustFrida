@@ -1,10 +1,15 @@
 /target/
 /loader/build/
 .idea/
-*.md
+
 *.lock
 qbdi/libQBDI.a
 loader/loader_check.o
 tools/*_test.js
 tools/*_test.sh
 CLAUDE.md
+
+# KPM build outputs
+ldmonitor-kpm/*.o
+ldmonitor-kpm/build/
+ldmonitor-kpm/*.zip

@@ -8,7 +8,6 @@ members = [
     "qbdi-helper",
     "ldmonitor",
     "ldmonitor-common",
-    "ldmonitor-ebpf",
     "qbdi",
     "quickjs-hook"
 ]
@@ -29,10 +28,6 @@ description = "Rust bindings for Frida"
 
 [workspace.dependencies]
 anyhow = "1"
-aya = "0.13"
-aya-ebpf = "0.1"
-aya-log-ebpf = "0.1"
-aya-build = "0.1"
 bytes = "1"
 cargo_metadata = "0.19"
 clap = "4"

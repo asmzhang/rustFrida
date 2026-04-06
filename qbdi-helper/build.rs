@@ -19,8 +19,16 @@ fn main() {
         let ndk_path = std::env::var("NDK_PATH")
             .or_else(|_| std::env::var("ANDROID_NDK_HOME"))
             .unwrap_or_else(|_| "/home/wwb/Android/Sdk/ndk/25.0.8775105".to_string());
+        
+        let host_os = std::env::consts::OS;
+        let prebuilt_dir = match host_os {
+            "windows" => "windows-x86_64",
+            "macos" => "darwin-x86_64",
+            _ => "linux-x86_64",
+        };
+        
         let cxx_lib_dir = std::path::PathBuf::from(&ndk_path)
-            .join("toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android");
+            .join(format!("toolchains/llvm/prebuilt/{}/sysroot/usr/lib/aarch64-linux-android", prebuilt_dir));
         let cxx_static = cxx_lib_dir.join("libc++_static.a");
         let cxxabi = cxx_lib_dir.join("libc++abi.a");
 

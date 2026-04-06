@@ -266,24 +266,22 @@ unsafe extern "C" fn js_java_deoptimize_method(
         );
     }
 
-    let class_name = match crate::jsapi::callback_util::extract_string_arg(
-        ctx, JSValue(*argv), b"class must be a string\0",
-    ) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let method_name = match crate::jsapi::callback_util::extract_string_arg(
-        ctx, JSValue(*argv.add(1)), b"method must be a string\0",
-    ) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
-    let sig = match crate::jsapi::callback_util::extract_string_arg(
-        ctx, JSValue(*argv.add(2)), b"sig must be a string\0",
-    ) {
-        Ok(v) => v,
-        Err(e) => return e,
-    };
+    let class_name =
+        match crate::jsapi::callback_util::extract_string_arg(ctx, JSValue(*argv), b"class must be a string\0") {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+    let method_name =
+        match crate::jsapi::callback_util::extract_string_arg(ctx, JSValue(*argv.add(1)), b"method must be a string\0")
+        {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
+    let sig =
+        match crate::jsapi::callback_util::extract_string_arg(ctx, JSValue(*argv.add(2)), b"sig must be a string\0") {
+            Ok(v) => v,
+            Err(e) => return e,
+        };
 
     let env = match ensure_jni_initialized() {
         Ok(e) => e,
@@ -630,8 +628,20 @@ pub fn register_java_api(ctx: &JSContext) {
         add_cfunction_to_object(ctx_ptr, java_obj, "hook", js_java_hook, 4);
         add_cfunction_to_object(ctx_ptr, java_obj, "unhook", js_java_unhook, 3);
         add_cfunction_to_object(ctx_ptr, java_obj, "deopt", js_java_deopt, 0);
-        add_cfunction_to_object(ctx_ptr, java_obj, "deoptimizeBootImage", js_java_deoptimize_boot_image, 0);
-        add_cfunction_to_object(ctx_ptr, java_obj, "deoptimizeEverything", js_java_deoptimize_everything, 0);
+        add_cfunction_to_object(
+            ctx_ptr,
+            java_obj,
+            "deoptimizeBootImage",
+            js_java_deoptimize_boot_image,
+            0,
+        );
+        add_cfunction_to_object(
+            ctx_ptr,
+            java_obj,
+            "deoptimizeEverything",
+            js_java_deoptimize_everything,
+            0,
+        );
         add_cfunction_to_object(ctx_ptr, java_obj, "deoptimizeMethod", js_java_deoptimize_method, 3);
         add_cfunction_to_object(ctx_ptr, java_obj, "setStealth", js_java_set_stealth, 1);
         add_cfunction_to_object(ctx_ptr, java_obj, "getStealth", js_java_get_stealth, 0);

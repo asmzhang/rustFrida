@@ -62,6 +62,7 @@ fn extract_fd_from_target(pid: i32, target_fd: i32) -> Result<RawFd, String> {
 /// 注意：不使用 frida_memfd 类型——即使该类型存在（Frida 残留），其 MLS range
 /// 定义可能不完整，导致 fsetxattr 返回 0 但 kernel 无法验证 context、退回 unlabeled:s0。
 /// tmpfs 是原生类型，天然支持所有 MLS ranges，且 selinux.rs 已有 TE allow 规则。
+#[allow(dead_code)]
 fn relabel_fd_for_injection(fd: RawFd, target_pid: i32) {
     // 读取目标进程的 MLS range
     let mls = read_target_mls_range(target_pid).unwrap_or_else(|| "s0".to_string());
@@ -153,7 +154,7 @@ fn find_data_dir_by_uid(uid: u32) -> Option<String> {
     }
 }
 
-/// 使用 eBPF 监听 SO 加载并自动附加
+/// 使用 KPM 监听 SO 加载并自动附加
 pub(crate) fn watch_and_inject(
     so_pattern: &str,
     timeout_secs: Option<u64>,
@@ -162,9 +163,9 @@ pub(crate) fn watch_and_inject(
     use ldmonitor::DlopenMonitor;
     use std::time::Duration;
 
-    log_info!("正在启动 eBPF 监听器，等待加载: {}", so_pattern);
+    log_info!("正在启动 KPM 监听器，等待加载: {}", so_pattern);
 
-    let monitor = DlopenMonitor::new(None).map_err(|e| format!("启动 eBPF 监听失败: {}", e))?;
+    let monitor = DlopenMonitor::new(None).map_err(|e| format!("启动 KPM 监听失败: {}", e))?;
 
     let info = if let Some(secs) = timeout_secs {
         log_info!("超时时间: {} 秒", secs);
@@ -433,14 +434,14 @@ fn run_loader_handshake(ctrl_fd: RawFd, target_pid: i32) -> Result<RawFd, String
     // 2. 发送 agent SO fd
     // 使用文件落地模式 (Option 1) 突破 Android 10+ Linker memfd 限制
     let target_uid = std::fs::metadata(format!("/proc/{}", target_pid))
-        .map(|m| { std::os::unix::fs::MetadataExt::uid(&m) })
+        .map(|m| std::os::unix::fs::MetadataExt::uid(&m))
         .unwrap_or(0);
-        
+
     let app_dir = find_data_dir_by_uid(target_uid).unwrap_or_else(|| "/data/local/tmp".to_string());
     let drop_path = format!("{}/rustfrida_agent_{}.so", app_dir, target_pid);
-    
+
     log_verbose!("利用落地模式，写入 Agent 至: {}", drop_path);
-    
+
     let agent_fd = match std::fs::File::create(&drop_path) {
         Ok(mut f) => {
             use std::io::Write;
@@ -451,7 +452,7 @@ fn run_loader_handshake(ctrl_fd: RawFd, target_pid: i32) -> Result<RawFd, String
         }
         Err(e) => return Err(format!("创建 {} 失败: {}", drop_path, e)),
     };
-    
+
     // 设置权限与 SELinux label
     unsafe {
         libc::fchmod(agent_fd, 0o755);
@@ -468,11 +469,11 @@ fn run_loader_handshake(ctrl_fd: RawFd, target_pid: i32) -> Result<RawFd, String
         let drop_cstr = std::ffi::CString::new(drop_path).unwrap();
         let agent_fd_ro = libc::open(drop_cstr.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC);
         libc::close(agent_fd);
-        
+
         if agent_fd_ro < 0 {
             return Err("重新打开只读 agent SO 失败".to_string());
         }
-        
+
         send_fd(ctrl_fd, agent_fd_ro)?;
         libc::close(agent_fd_ro);
     }

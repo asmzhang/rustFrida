@@ -51,7 +51,7 @@ pub(crate) struct Args {
     )]
     pub(crate) pid: Option<i32>,
 
-    /// 监听指定 SO 路径加载，自动附加到加载该 SO 的进程（需要 ldmonitor eBPF 组件：cargo build -p ldmonitor）
+    /// 监听指定 SO 路径加载，自动附加到加载该 SO 的进程（需要配置加载并使用 KPM 模块监控系统，附带 ldmonitor）
     #[arg(short = 'w', long = "watch-so", conflicts_with_all = ["name", "spawn"])]
     pub(crate) watch_so: Option<String>,
 

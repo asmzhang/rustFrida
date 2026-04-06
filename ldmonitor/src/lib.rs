@@ -1,7 +1,7 @@
-//! ldmonitor - eBPF-based library loading monitor
+//! ldmonitor - KPM-based library loading monitor
 //!
 //! This library provides functionality to monitor `android_dlopen_ext` calls
-//! using eBPF uprobes.
+//! using KPM (Kernel Profiling Module) dmesg streams.
 
 use log::debug;
 use std::fs;
@@ -113,7 +113,7 @@ impl From<&DlopenEvent> for DlopenInfo {
     }
 }
 
-/// eBPF dlopen 监听器
+/// KPM dlopen 监听器
 pub struct DlopenMonitor {
     receiver: Receiver<DlopenInfo>,
     stop_flag: Arc<AtomicBool>,
@@ -156,13 +156,13 @@ impl DlopenMonitor {
         })
     }
 
-    /// 停止监听并卸载 eBPF 程序
-    pub fn stop(mut self) {
+    /// 停止监听
+    pub fn stop(self) {
         self.stop_flag.store(true, Ordering::SeqCst);
         // if let Some(handle) = self.handle.take() {
         //     let _ = handle.join();
         // }
-        println!("eBPF 监听已停止");
+        println!("KPM 监听已停止");
     }
 
     /// 阻塞等待下一个 dlopen 事件
@@ -236,9 +236,9 @@ async fn run_monitor(
     sender: Sender<DlopenInfo>,
     stop_flag: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
+    use std::process::Stdio;
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::process::Command;
-    use std::process::Stdio;
 
     log::info!("Starting KPM dmesg log streaming backend...");
 
@@ -246,10 +246,7 @@ async fn run_monitor(
     let baseline = get_kernel_uptime();
     log::info!("dmesg baseline uptime: {:.3}s", baseline);
 
-    let mut child = Command::new("dmesg")
-        .arg("-w")
-        .stdout(Stdio::piped())
-        .spawn()?;
+    let mut child = Command::new("dmesg").arg("-w").stdout(Stdio::piped()).spawn()?;
 
     let stdout = child.stdout.take().unwrap();
     let mut reader = BufReader::new(stdout).lines();

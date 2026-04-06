@@ -23,5 +23,3 @@ impl DlopenEvent {
     }
 }
 
-#[cfg(feature = "user")]
-unsafe impl aya::Pod for DlopenEvent {}

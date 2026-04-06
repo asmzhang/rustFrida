@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use crate::injection::inject_via_bootstrapper;
 use crate::proc_mem::ProcMem;
 use crate::process::{parse_proc_maps, wait_until_stopped, MapEntry};
+#[allow(unused_imports)]
 use crate::{log_error, log_info, log_step, log_success, log_verbose, log_warn};
 
 /// 嵌入编译好的 zymbiote ELF
@@ -193,6 +194,7 @@ fn is_boot_heap(entry: &MapEntry) -> bool {
             || entry.path.contains("dalvik-LinearAlloc"))
 }
 
+#[allow(dead_code)]
 /// 判断给定地址是否在 boot heap 区域中
 fn is_boot_heap_addr(addr: u64, maps: &[MapEntry]) -> bool {
     maps.iter().any(|e| is_boot_heap(e) && addr >= e.start && addr < e.end)
@@ -1550,7 +1552,11 @@ fn build_payload(
     let replacement_setcontext_addr = payload_base + replacement_setcontext_offset;
     let replacement_prctl_addr = payload_base + replacement_prctl_offset;
     let ctx_base = zymbiote_offset as usize;
-    log_verbose!("ZymbioteContext: ctx_base=0x{:x}, payload_len=0x{:x}", ctx_base, payload.len());
+    log_verbose!(
+        "ZymbioteContext: ctx_base=0x{:x}, payload_len=0x{:x}",
+        ctx_base,
+        payload.len()
+    );
 
     // 填充 ZymbioteContext
     // socket_path
@@ -1586,14 +1592,27 @@ fn build_payload(
     write_u64(ctx, CTX_CLOSE - CTX_SOCKET_PATH, libc_funcs.close);
     write_u64(ctx, CTX_RAISE - CTX_SOCKET_PATH, libc_funcs.raise);
     // prop_remap: 有 profile 时启用
-    let prop_remap = if PROP_PROFILE_DIR.get().and_then(|v| v.as_ref()).is_some() { 1u64 } else { 0u64 };
-    log_verbose!("build_payload: prop_remap={} (PROP_PROFILE_DIR={:?})", prop_remap, PROP_PROFILE_DIR.get());
+    let prop_remap = if PROP_PROFILE_DIR.get().and_then(|v| v.as_ref()).is_some() {
+        1u64
+    } else {
+        0u64
+    };
+    log_verbose!(
+        "build_payload: prop_remap={} (PROP_PROFILE_DIR={:?})",
+        prop_remap,
+        PROP_PROFILE_DIR.get()
+    );
     write_u64(ctx, CTX_PROP_REMAP - CTX_SOCKET_PATH, prop_remap);
     // 无需 GOT 重定位：zymbiote 用 -shared -nostdlib 构建，
     // ARM64 ADRP+ADD 为 PC-relative 寻址，代码和数据在同一段内，
     // 移动到新地址后相对偏移不变。实测 .got 为空且无动态重定位。
 
-    Ok((payload, replacement_setargv0_addr, replacement_setcontext_addr, replacement_prctl_addr))
+    Ok((
+        payload,
+        replacement_setargv0_addr,
+        replacement_setcontext_addr,
+        replacement_prctl_addr,
+    ))
 }
 
 /// 在 payload 缓冲区内写入 u64 值
@@ -1780,7 +1799,7 @@ extern "C" fn signal_cleanup_handler(_sig: libc::c_int) {
 /// 注册 SIGINT/SIGTERM 信号处理函数
 pub(crate) fn register_cleanup_handler() {
     unsafe {
-        libc::signal(libc::SIGINT, signal_cleanup_handler as libc::sighandler_t);
-        libc::signal(libc::SIGTERM, signal_cleanup_handler as libc::sighandler_t);
+        libc::signal(libc::SIGINT, signal_cleanup_handler as usize as libc::sighandler_t);
+        libc::signal(libc::SIGTERM, signal_cleanup_handler as usize as libc::sighandler_t);
     }
 }

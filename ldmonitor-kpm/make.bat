@@ -1,1 +1,0 @@
-@%NDK_PATH%\prebuilt\windows-x86_64\bin\make %*

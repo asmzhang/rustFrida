@@ -3,6 +3,7 @@
 mod args;
 mod communication;
 mod injection;
+mod kpm;
 mod logger;
 mod proc_mem;
 mod process;
@@ -21,6 +22,7 @@ use clap::Parser;
 use communication::send_qbdi_helper;
 use communication::{send_command, start_socketpair_handler};
 use injection::{inject_via_bootstrapper, watch_and_inject};
+use kpm::{run_kpm_ctl, run_ldmon_ctl};
 use process::find_pid_by_name;
 use repl::{print_eval_result, print_help, run_js_repl, CommandCompleter};
 use rustyline::error::ReadlineError;
@@ -32,14 +34,14 @@ use std::sync::Arc;
 use types::get_string_table_names;
 
 fn main() {
-    // Fix #8: 先解析参数（--help/--version 在此退出），再打印 banner
+    // 先解析参数（--help/--version 在此退出），再打印 banner。
     let args = Args::parse();
     logger::print_banner();
 
-    // 初始化 verbose 模式
+    // 初始化 verbose 模式。
     logger::VERBOSE.store(args.verbose, Ordering::Relaxed);
 
-    // --dump-props: 独立操作，dump 后退出
+    // --dump-props: 独立操作，dump 后退出。
     if let Some(ref profile_name) = args.dump_props {
         match props::dump_props(profile_name) {
             Ok(()) => std::process::exit(0),
@@ -50,7 +52,7 @@ fn main() {
         }
     }
 
-    // --set-prop: 独立操作，修改属性后退出
+    // --set-prop: 独立操作，修改属性后退出。
     if let Some(ref set_args) = args.set_prop {
         match props::set_prop(&set_args[0], &set_args[1]) {
             Ok(()) => std::process::exit(0),
@@ -61,7 +63,7 @@ fn main() {
         }
     }
 
-    // --del-prop: 独立操作，删除属性后退出
+    // --del-prop: 独立操作，删除属性后退出。
     if let Some(ref del_args) = args.del_prop {
         match props::del_prop(&del_args[0], &del_args[1]) {
             Ok(()) => std::process::exit(0),
@@ -72,7 +74,7 @@ fn main() {
         }
     }
 
-    // --repack-props: 独立操作，重排后退出
+    // --repack-props: 独立操作，重排后退出。
     if let Some(ref profile_name) = args.repack_props {
         match props::repack_props(profile_name) {
             Ok(()) => std::process::exit(0),
@@ -83,13 +85,39 @@ fn main() {
         }
     }
 
-    // --profile 校验: 仅 --spawn 或 --server 可用
+    if let Some(ref ldmon) = args.ldmon {
+        match run_ldmon_ctl(ldmon) {
+            Ok(output) => {
+                println!("{}", output);
+                std::process::exit(0);
+            }
+            Err(e) => {
+                log_error!("ldmonitor control 失败: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    if let Some(ref kpm_ctl) = args.kpm_ctl {
+        match run_kpm_ctl(kpm_ctl) {
+            Ok(output) => {
+                println!("{}", output);
+                std::process::exit(0);
+            }
+            Err(e) => {
+                log_error!("KPM control 失败: {}", e);
+                std::process::exit(1);
+            }
+        }
+    }
+
+    // --profile 校验: 仅 --spawn 或 --server 可用。
     if args.profile.is_some() && args.spawn.is_none() && !args.server {
         log_error!("--profile 仅在 --spawn 或 --server 模式下可用");
         std::process::exit(1);
     }
 
-    // 属性 profile 预处理
+    // 属性 profile 预处理。
     if let Some(ref profile_name) = args.profile {
         match props::prep_prop_profile(profile_name) {
             Ok(profile_dir) => {
@@ -102,15 +130,13 @@ fn main() {
         }
     }
 
-    // ── Server daemon 模式 ──
+    // Server daemon 模式。
     if args.server {
         server::run_server(&args);
         return;
     }
 
-    // ── 以下为 legacy 单 session 模式 ──
-
-    // 解析 --name 到 PID（如果指定）
+    // 以下为 legacy 单 session 模式。
     let resolved_pid: Option<i32> = if let Some(ref name) = args.name {
         match find_pid_by_name(name) {
             Ok(pid) => {
@@ -126,7 +152,6 @@ fn main() {
         args.pid
     };
 
-    // 解析字符串覆盖参数（格式：name=value）
     let mut string_overrides = std::collections::HashMap::new();
     let available_names = get_string_table_names();
 
@@ -142,7 +167,6 @@ fn main() {
         }
     }
 
-    // 打印字符串覆盖信息
     if !string_overrides.is_empty() {
         log_info!("字符串覆盖列表 ({} 个):", string_overrides.len());
         for (name, value) in &string_overrides {
@@ -150,11 +174,8 @@ fn main() {
         }
     }
 
-    // 根据参数选择注入方式，返回 (target_pid, host_fd)
     let (target_pid, host_fd): (Option<i32>, RawFd) = if let Some(ref package) = args.spawn {
-        // Spawn 模式：注册信号处理函数，确保 Ctrl+C 时还原 Zygote patch
         spawn::register_cleanup_handler();
-        // Spawn 模式：注入 Zygote 后启动 App
         match spawn::spawn_and_inject(package, &string_overrides) {
             Ok((pid, fd)) => (Some(pid), fd),
             Err(e) => {
@@ -164,16 +185,24 @@ fn main() {
             }
         }
     } else if let Some(so_pattern) = &args.watch_so {
-        // 使用 KPM 监听 SO 加载
-        match watch_and_inject(so_pattern, args.timeout, &string_overrides) {
+        if let Err(e) = crate::selinux::patch_selinux_for_spawn() {
+            log_error!("SELinux 策略修补失败: {}", e);
+            std::process::exit(1);
+        }
+        match watch_and_inject(
+            so_pattern,
+            args.timeout,
+            resolved_pid.map(|pid| pid as u32),
+            &string_overrides,
+        ) {
             Ok(fd) => (resolved_pid, fd),
             Err(e) => {
+                crate::selinux::restore_selinux();
                 log_error!("注入失败: {}", e);
                 std::process::exit(1);
             }
         }
     } else if let Some(pid) = resolved_pid {
-        // 直接附加到指定 PID（来自 --pid 或 --name 解析结果）
         match inject_via_bootstrapper(pid, &string_overrides) {
             Ok(fd) => (Some(pid), fd),
             Err(e) => {
@@ -186,7 +215,6 @@ fn main() {
         std::process::exit(1);
     };
 
-    // 创建 legacy session (id=0)
     let label = if let Some(ref pkg) = args.spawn {
         pkg.clone()
     } else if let Some(ref name) = args.name {
@@ -201,10 +229,8 @@ fn main() {
         session.pid.store(pid, Ordering::Relaxed);
     }
 
-    // 启动 socketpair handler（在 host_fd 上读写）
     let _handle = start_socketpair_handler(host_fd, session.clone());
 
-    // 等待 agent 连接，默认超时 30s（可通过 --connect-timeout 调整）
     {
         log_info!("等待 agent 连接... (最长 {}s)", args.connect_timeout);
         let connected = if args.spawn.is_some() {
@@ -242,7 +268,6 @@ fn main() {
     }
     let sender = session.get_sender().unwrap();
 
-    // 传递 verbose 标志给 agent
     if args.verbose {
         let _ = send_command(sender, "__set_verbose__");
     }
@@ -255,7 +280,6 @@ fn main() {
         }
     }
 
-    // Spawn 模式: propload → jsinit → loadjs → resume
     if let Some(ref _package) = args.spawn {
         if let Some(pid) = target_pid {
             if spawn::signal_received() {
@@ -295,14 +319,12 @@ fn main() {
                     }
                 }
             }
-            // resume: hook 已就位，恢复子进程
             if let Err(e) = spawn::resume_child(pid as u32) {
                 log_error!("恢复子进程失败: {}", e);
             }
         }
     }
 
-    // 非 spawn 模式: --load-script 在 resume 后加载（进程已在运行）
     if args.spawn.is_none() {
         if let Some(script_path) = &args.load_script {
             match std::fs::read_to_string(script_path) {
@@ -349,7 +371,6 @@ fn main() {
     let _ = rl.load_history(".rustfrida_history");
     println!("  {DIM}输入 help 查看命令，exit 退出{RESET}");
 
-    // 发送 shutdown 到 agent，随后等待 agent 完整清理并主动关闭 socket
     let send_shutdown = |s: &Session| {
         if let Some(sender) = s.get_sender() {
             if let Err(e) = send_command(sender, "shutdown") {
@@ -361,13 +382,11 @@ fn main() {
     };
 
     loop {
-        // 检测 agent 是否已断连（agent 崩溃或目标进程被杀）
         if session.disconnected.load(Ordering::Acquire) {
             log_error!("Agent 连接已断开，请重新注入");
             break;
         }
 
-        // Spawn 模式：检测是否收到终止信号
         if args.spawn.is_some() && spawn::signal_received() {
             log_info!("收到终止信号，正在退出...");
             send_shutdown(&session);
@@ -394,7 +413,6 @@ fn main() {
                     run_js_repl(&session);
                     continue;
                 }
-                // 校验 hfl 必须带 <module> <offset> 两个参数
                 {
                     let parts: Vec<&str> = line.split_whitespace().collect();
                     if matches!(parts.first().copied(), Some("hfl")) && parts.len() < 3 {
@@ -437,12 +455,12 @@ fn main() {
 
     let _ = rl.save_history(".rustfrida_history");
 
-    // Spawn 模式：退出前还原 Zygote patch
     if args.spawn.is_some() {
         spawn::cleanup_zygote_patches();
     }
 
-    // 等待 agent 断开连接
+    crate::selinux::restore_selinux();
+
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
     while !session.disconnected.load(Ordering::Acquire) {
         if std::time::Instant::now() >= deadline {

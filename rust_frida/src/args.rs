@@ -38,7 +38,7 @@ Server daemon 模式（多 session 并发）:
   rustfrida --server --profile default                              # 启动 + 属性伪装持续生效
 
 注入后进入 REPL，输入 help 查看可用命令（jsinit / loadjs / jsrepl / jhook 等）。",
-    group(ArgGroup::new("target").required(true).args(["pid", "watch_so", "name", "spawn", "dump_props", "set_prop", "del_prop", "repack_props", "server"]))
+    group(ArgGroup::new("target").required(true).args(["pid", "watch_so", "name", "spawn", "dump_props", "set_prop", "del_prop", "repack_props", "server", "kpm_ctl", "ldmon"]))
 )]
 pub(crate) struct Args {
     /// 目标进程的PID（与 --watch-so、--name、--spawn 互斥）
@@ -52,7 +52,7 @@ pub(crate) struct Args {
     pub(crate) pid: Option<i32>,
 
     /// 监听指定 SO 路径加载，自动附加到加载该 SO 的进程
-    /// 当前实现使用 ldmonitor 的 KPM/dmesg 后端，设备侧需要先部署匹配的 KPM 模块
+    /// 当前实现使用 ldmonitor 的 KPM+dmesg 事件链路，设备侧需要先部署匹配的 KPM 模块，并以 root 上下文读取 dmesg
     #[arg(short = 'w', long = "watch-so", conflicts_with_all = ["name", "spawn"])]
     pub(crate) watch_so: Option<String>,
 
@@ -145,4 +145,21 @@ pub(crate) struct Args {
     /// 配合 --profile 使用可在整个 server 生命周期内持续生效。
     #[arg(long = "server", conflicts_with_all = ["pid", "watch_so", "name", "spawn"])]
     pub(crate) server: bool,
+
+    /// 调用已加载 KPM 模块的控制入口，格式: --kpm-ctl <MODULE> <COMMAND>
+    #[arg(
+        long = "kpm-ctl",
+        conflicts_with_all = ["pid", "watch_so", "name", "spawn", "dump_props", "set_prop", "del_prop", "repack_props", "server", "ldmon"],
+        num_args = 2,
+        value_names = ["MODULE", "COMMAND"]
+    )]
+    pub(crate) kpm_ctl: Option<Vec<String>>,
+
+    /// 调用默认 ldmonitor 模块控制命令，格式: --ldmon <COMMAND>
+    #[arg(
+        long = "ldmon",
+        conflicts_with_all = ["pid", "watch_so", "name", "spawn", "dump_props", "set_prop", "del_prop", "repack_props", "server", "kpm_ctl"],
+        value_name = "COMMAND"
+    )]
+    pub(crate) ldmon: Option<String>,
 }

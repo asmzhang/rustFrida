@@ -9,3 +9,10 @@ loader/loader_check.o
 tools/*_test.js
 tools/*_test.sh
 CLAUDE.md
+*.out
+*.err
+*.log
+*.kpm
+!ldmonitor-kpm/*.kpm
+ldmonitor-kpm/build/
+**/build

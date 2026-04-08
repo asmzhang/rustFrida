@@ -9,6 +9,7 @@ use std::os::unix::io::RawFd;
 use crate::process::{
     attach_to_process, call_target_function, read_memory, read_remote_mem, write_bytes, write_memory,
 };
+use crate::kpm::{cleanup_ldmonitor_watch, configure_ldmonitor_watch};
 use crate::types::{bootstrap_status, message_type, FridaBootstrapContext, FridaLibcApi, RustFridaLoaderContext};
 use crate::{log_error, log_info, log_success, log_verbose, log_warn};
 
@@ -153,16 +154,21 @@ fn find_data_dir_by_uid(uid: u32) -> Option<String> {
     }
 }
 
-/// 使用 ldmonitor 的 KPM/dmesg 后端监听 SO 加载并自动附加
+/// 使用 ldmonitor 的 KPM+dmesg 事件链路监听 SO 加载并自动附加
 pub(crate) fn watch_and_inject(
     so_pattern: &str,
     timeout_secs: Option<u64>,
+    target_pid: Option<u32>,
     string_overrides: &std::collections::HashMap<String, String>,
 ) -> Result<RawFd, String> {
     use ldmonitor::DlopenMonitor;
     use std::time::Duration;
 
     log_info!("正在启动 KPM 监听器，等待加载: {}", so_pattern);
+
+    if let Err(e) = configure_ldmonitor_watch(so_pattern, target_pid) {
+        log_warn!("KPM 控制面预配置失败，继续使用兼容监听路径: {}", e);
+    }
 
     let monitor = DlopenMonitor::new(None).map_err(|e| format!("启动 KPM 监听失败: {}", e))?;
 
@@ -175,6 +181,10 @@ pub(crate) fn watch_and_inject(
     };
 
     monitor.stop();
+
+    if let Err(e) = cleanup_ldmonitor_watch() {
+        log_warn!("KPM 控制面清理失败: {}", e);
+    }
 
     match info {
         Some(dlopen_info) => {

@@ -64,6 +64,24 @@ const RULES: &[(&str, &str, &str, &[&str])] = &[
         &["connectto", "read", "write", "getattr", "getopt"],
     ),
     ("domain", "$self", "tcp_socket", &["read", "write", "getattr", "getopt"]),
+    (
+        "domain",
+        "$self",
+        "netlink_socket",
+        &[
+            "create",
+            "read",
+            "write",
+            "getattr",
+            "setattr",
+            "append",
+            "bind",
+            "connect",
+            "getopt",
+            "setopt",
+            "shutdown",
+        ],
+    ),
     ("zygote", "zygote", "capability", &["sys_ptrace"]),
     ("?app_zygote", "zygote_exec", "file", &["read"]),
     ("system_server", "?apex_art_data_file", "file", &["execute"]),
@@ -873,7 +891,15 @@ pub fn patch_selinux_for_spawn() -> Result<(), String> {
     let self_type = get_self_type()?;
     log_verbose!("当前 SELinux domain: {}", self_type);
 
-    let policy_data = std::fs::read("/sys/fs/selinux/policy").map_err(|e| format!("读取策略失败: {}", e))?;
+    let policy_data = match std::fs::read("/sys/fs/selinux/policy") {
+        Ok(data) => data,
+        Err(e) => {
+            log_warn!("读取策略失败: {}，尝试回退到 setenforce 0", e);
+            setenforce(false)?;
+            SELINUX_SOFTENED.store(true, Ordering::Relaxed);
+            return Ok(());
+        }
+    };
     log_verbose!("策略大小: {} bytes", policy_data.len());
 
     let mut info = parse_policy(&policy_data)?;

@@ -8,7 +8,6 @@ members = [
     "qbdi-helper",
     "ldmonitor",
     "ldmonitor-common",
-    "ldmonitor-ebpf",
     "qbdi",
     "quickjs-hook"
 ]

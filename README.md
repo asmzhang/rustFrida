@@ -162,10 +162,20 @@ The current tree has switched the `ldmonitor` path toward the KPM backend instea
 
 - `--watch-so` depends on device-side KPM support
 - related resources live in `ldmonitor-kpm`
+- the currently verified event transport is `dmesg`, consumed from root context
+- legacy NetLink code is kept only as a compatibility path and is not the primary runtime path on the currently verified devices
 
 If you want this path enabled, you still need to deploy the matching KPM module to the target device.
 
 To build the KPM module itself, initialize the `SukiSU_KernelPatch_patch` submodule first.
+
+Current operational model:
+
+```text
+KPM syscall hook -> kernel log ([KPM-DLOPEN] via dmesg) -> ldmonitor -> rustfrida --watch-so
+```
+
+This means the current `--watch-so` path is intentionally root-oriented. Non-root `dmesg` access is not part of the supported path for this version.
 
 ## QBDI
 

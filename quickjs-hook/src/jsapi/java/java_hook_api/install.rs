@@ -234,7 +234,7 @@ pub(in crate::jsapi::java) unsafe extern "C" fn js_java_hook(
         cache_fields_for_class(env, &class_name);
 
         output_message(&format!(
-            "[java hook] 瀹屾垚: {}.{}{} (ArtMethod={:#x}, strategy=lsplant)",
+            "[java hook] 完成: {}.{}{} (ArtMethod={:#x}, strategy=lsplant)",
             class_name, method_name, actual_sig, art_method
         ));
 

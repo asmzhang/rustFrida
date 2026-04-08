@@ -4,6 +4,7 @@ import shutil
 import zipfile
 import sys
 import argparse
+from pathlib import Path
 
 # =======================
 # 全局配置区 (Configuration Zone)
@@ -27,10 +28,93 @@ PROP_DESC = "自动挂载内核层的 KPM 模块"
 
 def run_cmd(cmd):
     print(f"[*] 执行命令: {cmd}")
-    result = subprocess.run(cmd, shell=True)
+    if os.name == "nt":
+        result = subprocess.run(["cmd", "/c", cmd], shell=False)
+    else:
+        result = subprocess.run(cmd, shell=True)
     if result.returncode != 0:
         print(f"[!] 命令执行失败: {cmd}")
         sys.exit(result.returncode)
+
+def run_cmd_list(cmd, cwd=None):
+    printable = " ".join(f'"{c}"' if " " in c else c for c in cmd)
+    print(f"[*] 执行命令: {printable}")
+    result = subprocess.run(cmd, cwd=cwd)
+    if result.returncode != 0:
+        print(f"[!] 命令执行失败: {printable}")
+        sys.exit(result.returncode)
+
+def build_kpm_module(module_name, kp_dir, ndk_path):
+    project_dir = Path.cwd()
+    build_dir = project_dir / "build"
+    if build_dir.exists():
+        shutil.rmtree(build_dir)
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    platform = "windows-x86_64" if os.name == "nt" else "linux-x86_64"
+    toolchain_dir = Path(ndk_path) / "toolchains" / "llvm" / "prebuilt" / platform / "bin"
+    if not toolchain_dir.exists():
+        print(f"[-] 致命错误: 找不到 NDK 工具链目录: {toolchain_dir}")
+        sys.exit(1)
+
+    clang = toolchain_dir / ("aarch64-linux-android31-clang.cmd" if os.name == "nt" else "aarch64-linux-android31-clang")
+    strip_bin = toolchain_dir / ("llvm-strip.exe" if os.name == "nt" else "llvm-strip")
+    if not clang.exists():
+        print(f"[-] 致命错误: 找不到 clang: {clang}")
+        sys.exit(1)
+    if not strip_bin.exists():
+        print(f"[-] 致命错误: 找不到 llvm-strip: {strip_bin}")
+        sys.exit(1)
+
+    kp_kernel_dir = Path(kp_dir) / "kernel"
+    include_dirs = [
+        ".",
+        "include",
+        "patch/include",
+        "linux/include",
+        "linux/arch/arm64/include",
+        "linux/tools/arch/arm64/include",
+    ]
+    include_flags = [f"-I{(kp_kernel_dir / rel).resolve()}" for rel in include_dirs]
+
+    src_file = project_dir / f"{module_name}.c"
+    if not src_file.exists():
+        print(f"[-] 致命错误: 找不到源文件: {src_file}")
+        sys.exit(1)
+
+    obj_file = build_dir / f"{module_name}.o"
+    out_file = build_dir / f"{module_name}.kpm"
+
+    common_flags = [
+        "-Wall",
+        "-Ofast",
+        "-fno-PIC",
+        "-fno-asynchronous-unwind-tables",
+        "-fno-stack-protector",
+        "-fno-unwind-tables",
+        "-fno-semantic-interposition",
+        "-U_FORTIFY_SOURCE",
+        "-fno-common",
+        "-fvisibility=hidden",
+    ]
+
+    compile_cmd = [str(clang), *include_flags, *common_flags, "-c", "-O2", "-o", str(obj_file), str(src_file)]
+    link_cmd = [str(clang), "-s", "-r", "-o", str(out_file), str(obj_file)]
+    strip_cmd = [
+        str(strip_bin),
+        "-g",
+        "--strip-unneeded",
+        "--strip-debug",
+        "--remove-section=.comment",
+        "--remove-section=.note.GNU-stack",
+        str(out_file),
+    ]
+
+    run_cmd_list(compile_cmd)
+    run_cmd_list(link_cmd)
+    run_cmd_list(strip_cmd)
+
+    return out_file
 
 def generate_module_files(module_dir, MODULE_NAME):
     """
@@ -133,8 +217,6 @@ def main():
     # 0. 如果仅仅是清理行为
     if args.target == "clean":
         print("[+] 正在执行单一清理动作...")
-        run_cmd("make.bat clean" if os.name == "nt" else "make clean")
-        # 清理打包区
         if os.path.exists("build"):
             shutil.rmtree("build")
         sys.exit(0)
@@ -162,24 +244,9 @@ def main():
         MODULE_NAME = os.path.splitext(c_files[0])[0]
         print(f"[*] 自动追踪到源文件: {c_files[0]} -> 锁定模块名: {MODULE_NAME}")
 
-    print("[+] 正在清理旧构建...")
-    run_cmd("make.bat clean" if os.name == "nt" else "make clean")
-
     print(f"[+] 正在编译模块: {MODULE_NAME}.kpm ...")
-    
-    # 传递 MODULE_NAME 变量给 Makefile，处理 KP_DIR
-    make_args = f"MODULE_NAME={MODULE_NAME}"
-    
     final_kp_dir = args.kp_dir if args.kp_dir else KP_DIR
-    if final_kp_dir:
-        make_args += f' KP_DIR="{final_kp_dir}"'
-        
-    run_cmd(f"make.bat {make_args} all" if os.name == "nt" else f"make {make_args} all")
-
-    kpm_output = os.path.join("build", f"{MODULE_NAME}.kpm")
-    if not os.path.exists(kpm_output):
-        print(f"[-] 编译失败，未找到 {kpm_output}")
-        sys.exit(1)
+    kpm_output = build_kpm_module(MODULE_NAME, final_kp_dir, ndk_path)
 
     print("[+] 正在准备打包环境...")
     # 在 build/module 下创建临时的打包工作区
@@ -189,7 +256,7 @@ def main():
     os.makedirs(staging_dir)
         
     # 1. 复制编译产物 .kpm 文件
-    shutil.copy(kpm_output, os.path.join(staging_dir, f"{MODULE_NAME}.kpm"))
+    shutil.copy(str(kpm_output), os.path.join(staging_dir, f"{MODULE_NAME}.kpm"))
 
     # 2. 动态生成 module.prop 和 service.sh
     generate_module_files(staging_dir, MODULE_NAME)
@@ -223,7 +290,7 @@ def main():
     shutil.rmtree(staging_dir)
 
     print("-" * 40)
-    print("[*] 🎉 编译与打包大功告成！")
+    print("[*] 编译与打包完成")
     print(f"[*] 产物生成位置: {zip_path}")
     print("-" * 40)
 

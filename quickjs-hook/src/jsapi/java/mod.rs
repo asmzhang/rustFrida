@@ -712,6 +712,14 @@ unsafe fn release_java_hook_resources(
                 libc::free(*replacement_addr as *mut std::ffi::c_void);
             }
         }
+        callback::HookType::Lsplant { target_method_ref } => {
+            if *target_method_ref != 0 {
+                if let Some(env) = env_opt {
+                    let delete_global_ref: DeleteGlobalRefFn = jni_fn!(env, DeleteGlobalRefFn, JNI_DELETE_GLOBAL_REF);
+                    delete_global_ref(env, *target_method_ref as *mut std::ffi::c_void);
+                }
+            }
+        }
     }
 
     // 2-ArtMethod 模型: clone 已去掉，无需释放
@@ -779,6 +787,11 @@ pub fn cleanup_java_hooks() {
         if let Some(registry) = guard.as_ref() {
             for (_art_method, data) in registry.iter() {
                 unsafe {
+                    if let callback::HookType::Lsplant { target_method_ref } = &data.hook_type {
+                        crate::lsplant_bridge::unhook_method(*target_method_ref as *mut std::ffi::c_void);
+                        let _ = crate::lsplant_bridge::release_callback_hook(*target_method_ref as *mut std::ffi::c_void);
+                        continue;
+                    }
                     // 恢复 ArtMethod 字段 (flags, data_, entry_point)
                     if let Some(spec) = ART_METHOD_SPEC.get() {
                         let ep_offset = spec.entry_point_offset;

@@ -13,6 +13,9 @@ pub(super) enum HookType {
         replacement_addr: usize,
         per_method_hook_target: Option<u64>,
     },
+    Lsplant {
+        target_method_ref: usize,
+    },
 }
 
 pub(super) struct JavaHookData {

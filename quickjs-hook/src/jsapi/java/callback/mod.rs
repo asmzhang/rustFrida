@@ -50,5 +50,6 @@ include!("signature.rs");
 include!("marshal.rs");
 include!("invoke.rs");
 include!("original_call.rs");
+include!("lsplant.rs");
 include!("hook.rs");
 include!("replaced.rs");

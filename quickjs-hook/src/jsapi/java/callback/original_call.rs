@@ -398,6 +398,22 @@ unsafe extern "C" fn js_call_original(
     _argc: i32,
     _argv: *mut ffi::JSValue,
 ) -> ffi::JSValue {
+    let lsplant_backup_method =
+        get_js_u64_property(ctx, this_val, "__lsplantBackupMethod") as *mut std::ffi::c_void;
+    let lsplant_args = get_js_u64_property(ctx, this_val, "__lsplantArgs") as *mut std::ffi::c_void;
+    if !lsplant_backup_method.is_null() && !lsplant_args.is_null() {
+        let art_method_addr = get_js_u64_property(ctx, this_val, "__hookArtMethod");
+        return js_call_original_lsplant(
+            ctx,
+            this_val,
+            _argc,
+            _argv,
+            art_method_addr,
+            lsplant_backup_method,
+            lsplant_args,
+        );
+    }
+
     let art_method_addr = get_js_u64_property(ctx, this_val, "__hookArtMethod");
     let ctx_ptr = get_js_u64_property(ctx, this_val, "__hookCtxPtr") as *mut hook_ffi::HookContext;
     if ctx_ptr.is_null() || art_method_addr == 0 {

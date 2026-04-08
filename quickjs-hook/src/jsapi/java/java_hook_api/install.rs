@@ -5,6 +5,7 @@ use crate::jsapi::callback_util::{
     with_registry_mut,
 };
 use crate::jsapi::console::{output_message, output_verbose};
+use crate::lsplant_bridge;
 use crate::value::JSValue;
 
 use super::super::art_controller::ensure_art_controller_initialized;
@@ -12,9 +13,30 @@ use super::super::art_method::*;
 use super::super::callback::*;
 use super::super::jni_core::*;
 use super::install_support::{
-    create_class_global_ref, create_replacement_art_method,
-    install_per_method_router_hook, update_original_method_flags_for_hook, JavaHookInstallGuard,
+    create_class_global_ref, create_replacement_art_method, install_per_method_router_hook,
+    update_original_method_flags_for_hook, JavaHookInstallGuard,
 };
+
+fn should_use_lsplant_backend(class_name: &str) -> bool {
+    [
+        "android/",
+        "android.",
+        "java/",
+        "java.",
+        "javax/",
+        "javax.",
+        "dalvik/",
+        "dalvik.",
+        "sun/",
+        "sun.",
+        "libcore/",
+        "libcore.",
+        "com/android/",
+        "com.android.",
+    ]
+    .iter()
+    .any(|prefix| class_name.starts_with(prefix))
+}
 
 pub(in crate::jsapi::java) unsafe extern "C" fn js_java_hook(
     ctx: *mut ffi::JSContext,
@@ -143,6 +165,82 @@ pub(in crate::jsapi::java) unsafe extern "C" fn js_java_hook(
             return throw_internal_error(ctx, msg);
         }
     };
+    let return_type = get_return_type_from_sig(&actual_sig);
+
+    if should_use_lsplant_backend(&class_name) {
+        let vm = match get_java_vm() {
+            Some(vm) => vm,
+            None => return throw_internal_error(ctx, "JavaVM unavailable for LSPlant backend"),
+        };
+        if !lsplant_bridge::init(vm) {
+            return throw_internal_error(ctx, "LSPlant init failed");
+        }
+        if !lsplant_bridge::prepare_callback_host() {
+            return throw_internal_error(ctx, "LSPlant callback host prepare failed");
+        }
+
+        let (target_method_local, _target_art_method, _resolved_is_static) =
+            match resolve_reflected_method(env, &class_name, &method_name, &actual_sig, force_static) {
+                Ok(v) => v,
+                Err(msg) => return throw_internal_error(ctx, msg),
+            };
+
+        let new_global_ref: NewGlobalRefFn = jni_fn!(env, NewGlobalRefFn, JNI_NEW_GLOBAL_REF);
+        let delete_local_ref: DeleteLocalRefFn = jni_fn!(env, DeleteLocalRefFn, JNI_DELETE_LOCAL_REF);
+        let target_method_ref = new_global_ref(env, target_method_local);
+        delete_local_ref(env, target_method_local);
+        if target_method_ref.is_null() || jni_check_exc(env) {
+            return throw_internal_error(ctx, "failed to create global ref for reflected target method");
+        }
+
+        let backup_method = lsplant_bridge::hook_method_with_callback(
+            target_method_ref,
+            art_method as usize as *mut std::ffi::c_void,
+            java_lsplant_callback,
+        );
+        if backup_method.is_null() {
+            let delete_global_ref: DeleteGlobalRefFn = jni_fn!(env, DeleteGlobalRefFn, JNI_DELETE_GLOBAL_REF);
+            delete_global_ref(env, target_method_ref);
+            return throw_internal_error(ctx, "LSPlant standard hook failed");
+        }
+        delete_local_ref(env, backup_method);
+
+        let callback_bytes = dup_callback_to_bytes(ctx, callback_arg.raw());
+
+        with_registry_mut(&JAVA_HOOK_REGISTRY, |registry| {
+            registry.insert(
+                art_method,
+                JavaHookData {
+                    art_method,
+                    original_access_flags,
+                    original_entry_point,
+                    original_data,
+                    hook_type: HookType::Lsplant { target_method_ref: target_method_ref as usize },
+                    clone_addr: 0,
+                    class_global_ref,
+                    return_type,
+                    return_type_sig: get_return_type_sig(&actual_sig),
+                    ctx: ctx as usize,
+                    callback_bytes,
+                    method_key: method_key(&class_name, &method_name, &actual_sig),
+                    is_static,
+                    param_count: count_jni_params(&actual_sig),
+                    param_types: parse_jni_param_types(&actual_sig),
+                    class_name: class_name.clone(),
+                },
+            );
+        });
+
+        cache_fields_for_class(env, &class_name);
+
+        output_message(&format!(
+            "[java hook] 瀹屾垚: {}.{}{} (ArtMethod={:#x}, strategy=lsplant)",
+            class_name, method_name, actual_sig, art_method
+        ));
+
+        return JSValue::bool(true).raw();
+    }
+
     let clone_size = spec.size;
     let mut install_guard = JavaHookInstallGuard::new(
         art_method,
@@ -155,7 +253,6 @@ pub(in crate::jsapi::java) unsafe extern "C" fn js_java_hook(
         class_global_ref,
     );
 
-    let return_type = get_return_type_from_sig(&actual_sig);
     let has_independent_code = !is_art_quick_entrypoint(original_entry_point, bridge);
     let is_constructor = method_name == "<init>";
 

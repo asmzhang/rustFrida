@@ -154,6 +154,8 @@ pub(super) struct ReflectIds {
     pub(super) field_get_type_mid: *mut std::ffi::c_void,
     /// Class.getName() → String
     pub(super) class_get_name_mid: *mut std::ffi::c_void,
+    /// Global ref to java.lang.Object class (for callback-side Object[] allocation)
+    pub(super) object_class: *mut std::ffi::c_void,
     /// Global ref to java.lang.String class (for IsInstanceOf checks in callbacks)
     #[allow(dead_code)]
     pub(super) string_class: *mut std::ffi::c_void,
@@ -806,6 +808,7 @@ pub(super) unsafe fn cache_reflect_ids(env: JniEnv) {
 
         let c_class_cls = CString::new("java/lang/Class").unwrap();
         let c_field_cls = CString::new("java/lang/reflect/Field").unwrap();
+        let c_object_cls = CString::new("java/lang/Object").unwrap();
         let c_string_cls = CString::new("java/lang/String").unwrap();
         let c_list_cls = CString::new("java/util/List").unwrap();
         let c_array_cls = CString::new("java/lang/reflect/Array").unwrap();
@@ -820,6 +823,7 @@ pub(super) unsafe fn cache_reflect_ids(env: JniEnv) {
 
         let class_cls = find_class(env, c_class_cls.as_ptr());
         let field_cls = find_class(env, c_field_cls.as_ptr());
+        let object_cls_local = find_class(env, c_object_cls.as_ptr());
         let string_cls_local = find_class(env, c_string_cls.as_ptr());
         let list_cls_local = find_class(env, c_list_cls.as_ptr());
         let array_cls_local = find_class(env, c_array_cls.as_ptr());
@@ -834,6 +838,13 @@ pub(super) unsafe fn cache_reflect_ids(env: JniEnv) {
         jni_check_exc(env);
 
         // Create global refs for classes that must remain valid in hook callbacks
+        let object_class = if !object_cls_local.is_null() {
+            let g = new_global_ref(env, object_cls_local);
+            delete_local_ref(env, object_cls_local);
+            g
+        } else {
+            std::ptr::null_mut()
+        };
         let string_class = if !string_cls_local.is_null() {
             let g = new_global_ref(env, string_cls_local);
             delete_local_ref(env, string_cls_local);
@@ -1059,6 +1070,7 @@ pub(super) unsafe fn cache_reflect_ids(env: JniEnv) {
             get_declared_field_mid,
             field_get_type_mid,
             class_get_name_mid,
+            object_class,
             string_class,
             list_class,
             list_size_mid,
@@ -1086,6 +1098,7 @@ pub(super) unsafe fn cache_reflect_ids(env: JniEnv) {
 /// 将 local ref 转为 global ref 并缓存 loadClass method ID。
 pub(super) unsafe fn update_app_classloader(env: JniEnv, cl_local: *mut std::ffi::c_void) {
     if cl_local.is_null() {
+        crate::jsapi::console::output_verbose("[Java.ready] update_app_classloader: cl_local is null");
         return;
     }
 
@@ -1093,6 +1106,11 @@ pub(super) unsafe fn update_app_classloader(env: JniEnv, cl_local: *mut std::ffi
     let delete_global_ref: DeleteGlobalRefFn = jni_fn!(env, DeleteGlobalRefFn, JNI_DELETE_GLOBAL_REF);
     let gl = new_global_ref(env, cl_local);
     if gl.is_null() {
+        crate::jsapi::console::output_verbose(&format!(
+            "[Java.ready] update_app_classloader: NewGlobalRef failed for local={:p}",
+            cl_local
+        ));
+        jni_check_exc(env);
         return;
     }
 
@@ -1125,7 +1143,8 @@ pub(super) unsafe fn update_app_classloader(env: JniEnv, cl_local: *mut std::ffi
 
 /// 检查 app ClassLoader 是否可用（init 阶段或 override 阶段均算）
 pub(super) fn is_classloader_ready() -> bool {
-    if CL_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+    let override_ptr = CL_OVERRIDE.load(std::sync::atomic::Ordering::Relaxed);
+    if override_ptr != 0 {
         return true;
     }
     REFLECT_IDS.get().map_or(false, |r| !r.app_classloader.is_null())
@@ -1146,7 +1165,6 @@ pub(super) unsafe fn reprobe_classloader() -> bool {
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
         if reprobe_classloader_once() {
-            crate::jsapi::console::output_verbose(&format!("[Java.ready] reprobe succeeded after {}ms", attempt * 100));
             return true;
         }
     }
@@ -1257,7 +1275,6 @@ unsafe fn reprobe_classloader_once() -> bool {
     }
     delete_local_ref(env, cl);
 
-    crate::jsapi::console::output_verbose("[Java.ready] reprobe_classloader: app ClassLoader found");
     true
 }
 

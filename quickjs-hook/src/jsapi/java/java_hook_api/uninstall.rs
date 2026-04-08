@@ -2,6 +2,7 @@ use crate::ffi;
 use crate::ffi::hook as hook_ffi;
 use crate::jsapi::callback_util::{extract_string_arg, with_registry, with_registry_mut};
 use crate::jsapi::console::{output_message, output_verbose};
+use crate::lsplant_bridge;
 use crate::value::JSValue;
 
 use super::super::callback::*;
@@ -60,9 +61,8 @@ pub(in crate::jsapi::java) unsafe extern "C" fn js_java_unhook(
     };
 
     let hook_data = with_registry_mut(&JAVA_HOOK_REGISTRY, |registry| registry.remove(&art_method_addr)).flatten();
-
     let hook_data = match hook_data {
-        Some(d) => d,
+        Some(data) => data,
         None => {
             return ffi::JS_ThrowInternalError(ctx, b"method not hooked\0".as_ptr() as *const _);
         }
@@ -74,16 +74,14 @@ pub(in crate::jsapi::java) unsafe extern "C" fn js_java_unhook(
             per_method_hook_target,
         } => {
             output_verbose(&format!(
-                "[java unhook] 开始: art_method={:#x}, replacement={:#x}, per_method={:?}",
+                "[java unhook] start: art_method={:#x}, replacement={:#x}, per_method={:?}",
                 hook_data.art_method, replacement_addr, per_method_hook_target
             ));
 
             delete_replacement_method(hook_data.art_method);
-            output_verbose("[java unhook] Step 1: replacedMethods 已删除");
 
             if let Some(target) = per_method_hook_target {
                 hook_ffi::hook_remove(*target as *mut std::ffi::c_void);
-                output_verbose(&format!("[java unhook] Step 2: Layer 3 hook 已移除: {:#x}", target));
             }
 
             if let Some(spec) = ART_METHOD_SPEC.get() {
@@ -104,22 +102,34 @@ pub(in crate::jsapi::java) unsafe extern "C" fn js_java_unhook(
                 );
 
                 hook_ffi::hook_flush_cache((hook_data.art_method as usize) as *mut std::ffi::c_void, ep_offset + 8);
-                output_verbose("[java unhook] Step 3: ArtMethod 字段已恢复");
             }
 
             hook_ffi::hook_remove_redirect(hook_data.art_method);
-            output_verbose("[java unhook] Step 4: native trampoline 已移除");
 
             if !wait_for_in_flight_java_hook_callbacks(std::time::Duration::from_millis(200)) {
                 output_verbose(&format!(
-                    "[java unhook] 等待 in-flight callbacks 超时，remaining={}",
+                    "[java unhook] replaced backend in-flight callbacks remaining={}",
                     in_flight_java_hook_callbacks()
                 ));
             }
+        }
+        HookType::Lsplant { target_method_ref } => {
             output_verbose(&format!(
-                "[java unhook] Step 5: in-flight callbacks 已收敛，replacement={:#x}",
-                replacement_addr
+                "[java unhook] LSPlant backend: art_method={:#x}, target_method_ref={:#x}",
+                hook_data.art_method, target_method_ref
             ));
+
+            if !lsplant_bridge::unhook_method(*target_method_ref as *mut std::ffi::c_void) {
+                return ffi::JS_ThrowInternalError(ctx, b"LSPlant unhook failed\0".as_ptr() as *const _);
+            }
+            let _ = lsplant_bridge::release_callback_hook(*target_method_ref as *mut std::ffi::c_void);
+
+            if !wait_for_in_flight_java_hook_callbacks(std::time::Duration::from_millis(200)) {
+                output_verbose(&format!(
+                    "[java unhook] LSPlant in-flight callbacks remaining={}",
+                    in_flight_java_hook_callbacks()
+                ));
+            }
         }
     }
 
@@ -127,7 +137,7 @@ pub(in crate::jsapi::java) unsafe extern "C" fn js_java_unhook(
     release_java_hook_resources(&hook_data, env_opt, false, true);
 
     output_message(&format!(
-        "[java unhook] 完成: {}.{}{}",
+        "[java unhook] complete: {}.{}{}",
         class_name, method_name, actual_sig
     ));
 

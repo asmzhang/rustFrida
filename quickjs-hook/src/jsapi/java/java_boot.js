@@ -578,8 +578,11 @@
     var _readyCallbacks = [];
     var _readyFired = false;
     var _readyGateSig = "(Ljava/lang/ClassLoader;Ljava/lang/String;Landroid/content/Context;)Landroid/app/Application;";
+    var _gateHooksInstalled = false;
+    var _makeApplicationSig = "(ZLandroid/app/Instrumentation;)Landroid/app/Application;";
+    var _handleBindApplicationSig = "(Landroid/app/ActivityThread$AppBindData;)V";
 
-    Java.ready = function(fn) {
+    var _legacyReady = function(fn) {
         if (typeof fn !== "function") {
             throw new Error("Java.ready() requires a function argument");
         }
@@ -628,6 +631,221 @@
         }
 
         _readyCallbacks.push(fn);
+    };
+
+    function _readyLog(msg) {
+        if (Java.__readyDebug === true) {
+            console.log("[Java.ready] " + msg);
+        }
+    }
+
+    function _extractJptr(value) {
+        if (value === null || value === undefined) {
+            return null;
+        }
+        if (typeof value === "object" && value.ptr !== undefined) {
+            return value.ptr;
+        }
+        if (typeof value === "object" && value.__jptr !== undefined) {
+            return value.__jptr;
+        }
+        if (typeof value === "number") {
+            return value;
+        }
+        if (typeof value === "bigint") {
+            return value;
+        }
+        return null;
+    }
+
+    function _updateReadyClassLoader(loader, source) {
+        var loaderPtr = _extractJptr(loader);
+        if (loaderPtr === null) {
+            _readyLog("no classloader pointer from " + source);
+            return false;
+        }
+
+        try {
+            var ok = Java.setClassLoader(loader);
+            _readyLog("setClassLoader(" + source + ", ptr=" + loaderPtr + ") => " + ok);
+            return !!ok;
+        } catch (e) {
+            _readyLog("failed to update ClassLoader from " + source + ": " + e);
+            return false;
+        }
+    }
+
+    function _tryResolveLoadedApkLoader(loadedApk, source) {
+        if (loadedApk === null || loadedApk === undefined) {
+            return false;
+        }
+
+        try {
+            var loader = loadedApk.getClassLoader();
+            if (_updateReadyClassLoader(loader, source + ".getClassLoader")) {
+                return true;
+            }
+        } catch (e) {
+            _readyLog(source + ".getClassLoader failed: " + e);
+        }
+
+        try {
+            if (_updateReadyClassLoader(loadedApk.mClassLoader, source + ".mClassLoader")) {
+                return true;
+            }
+        } catch (e2) {
+            _readyLog(source + ".mClassLoader failed: " + e2);
+        }
+
+        return false;
+    }
+
+    function _tryResolveAppBindDataLoader(appBindData, source) {
+        if (appBindData === null || appBindData === undefined) {
+            return false;
+        }
+
+        try {
+            if (appBindData.info !== null && appBindData.info !== undefined) {
+                if (_tryResolveLoadedApkLoader(appBindData.info, source + ".info")) {
+                    return true;
+                }
+            }
+        } catch (e) {
+            _readyLog(source + ".info failed: " + e);
+        }
+
+        return false;
+    }
+
+    function _flushReadyCallbacks(reason) {
+        _readyLog("flush requested: " + reason + ", fired=" + _readyFired + ", callbacks=" + _readyCallbacks.length);
+        if (_readyFired) {
+            return true;
+        }
+
+        var readyBefore = false;
+        try {
+            readyBefore = Java._isClassLoaderReady();
+        } catch (e0) {
+            _readyLog("isClassLoaderReady failed before flush (" + reason + "): " + e0);
+        }
+        _readyLog("flush precheck: readyBefore=" + readyBefore + ", reason=" + reason);
+
+        if (!readyBefore) {
+            try {
+                if (!Java._reprobeClassLoader()) {
+                    _readyLog("flush aborted: classloader still not ready after reprobe (" + reason + ")");
+                    return false;
+                }
+            } catch (e) {
+                _readyLog("reprobe failed during flush (" + reason + "): " + e);
+                return false;
+            }
+        }
+
+        _readyFired = true;
+        _readyLog("flushing callbacks from " + reason);
+
+        var cbs = _readyCallbacks;
+        _readyCallbacks = [];
+        for (var i = 0; i < cbs.length; i++) {
+            try {
+                _readyLog("invoking callback #" + i + " from " + reason);
+                cbs[i]();
+                _readyLog("callback #" + i + " completed");
+            } catch (e2) {
+                console.log("[Java.ready] callback #" + i + " error: " + e2);
+            }
+        }
+
+        return true;
+    }
+
+    function _installGateHook() {
+        if (_gateHooksInstalled) {
+            return;
+        }
+        _gateHooksInstalled = true;
+
+        try {
+            Java.deoptimizeBootImage();
+            _readyLog("deoptimizeBootImage() done before gate install");
+        } catch (deoptErr) {
+            _readyLog("deoptimizeBootImage() failed before gate install: " + deoptErr);
+        }
+
+        try {
+            _hook("android/app/ActivityThread", "handleBindApplication", _handleBindApplicationSig, function(ctx) {
+                _readyLog("entered ActivityThread.handleBindApplication gate");
+
+                if (ctx.args && ctx.args[0] !== null && ctx.args[0] !== undefined) {
+                    if (_tryResolveAppBindDataLoader(ctx.args[0], "ActivityThread.handleBindApplication")) {
+                        _flushReadyCallbacks("ActivityThread.handleBindApplication.pre");
+                    }
+                }
+
+                var result = ctx.orig();
+
+                if (!_readyFired && ctx.args && ctx.args[0] !== null && ctx.args[0] !== undefined) {
+                    if (_tryResolveAppBindDataLoader(ctx.args[0], "ActivityThread.handleBindApplication.post")) {
+                        _flushReadyCallbacks("ActivityThread.handleBindApplication.post");
+                    }
+                }
+
+                return result;
+            });
+        } catch (e0) {
+            _readyLog("failed to install ActivityThread.handleBindApplication gate: " + e0);
+        }
+
+        try {
+            _hook("android/app/LoadedApk", "makeApplication", _makeApplicationSig, function(ctx) {
+                var app = ctx.orig();
+                _readyLog("entered LoadedApk.makeApplication gate");
+                _tryResolveLoadedApkLoader(ctx.thisObj, "LoadedApk.makeApplication");
+                _flushReadyCallbacks("LoadedApk.makeApplication");
+                return app;
+            });
+        } catch (e1) {
+            _readyLog("failed to install LoadedApk.makeApplication gate: " + e1);
+        }
+
+        try {
+            _hook("android/app/Instrumentation", "newApplication", _readyGateSig, function(ctx) {
+                var app = ctx.orig();
+                _readyLog("entered Instrumentation.newApplication gate");
+
+                if (ctx.args && ctx.args[0] !== null && ctx.args[0] !== undefined) {
+                    _updateReadyClassLoader(ctx.args[0], "Instrumentation.newApplication");
+                }
+
+                _flushReadyCallbacks("Instrumentation.newApplication");
+                return app;
+            });
+        } catch (e2) {
+            _readyLog("failed to install Instrumentation.newApplication gate: " + e2);
+        }
+    }
+
+    Java._installGateHook = _installGateHook;
+
+    Java.ready = function(fn) {
+        if (typeof fn !== "function") {
+            throw new Error("Java.ready() requires a function argument");
+        }
+
+        if (_readyFired || Java._isClassLoaderReady()) {
+            _readyFired = true;
+            _readyLog("executing callback immediately");
+            fn();
+            return;
+        }
+
+        _readyCallbacks.push(fn);
+        _readyLog("callback queued, total=" + _readyCallbacks.length);
+        _installGateHook();
+        _flushReadyCallbacks("post-install-probe");
     };
 
     Java.classLoaders = function() {

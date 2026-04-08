@@ -1,3 +1,6 @@
 [submodule "quickjs-hook/quickjs-src"]
 	path = quickjs-hook/quickjs-src
 	url = https://github.com/bellard/quickjs.git
+[submodule "SukiSU_KernelPatch_patch"]
+	path = SukiSU_KernelPatch_patch
+	url = https://github.com/asmzhang/SukiSU_KernelPatch_patch.git

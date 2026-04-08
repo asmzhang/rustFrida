@@ -37,10 +37,10 @@ On Windows, if `LIBCLANG_PATH` is not set, `build.py` will try to auto-detect it
 
 ## First-Time Checkout
 
-QuickJS is kept as a git submodule, so a fresh clone still needs:
+QuickJS and the KernelPatch headers used by `ldmonitor-kpm` are kept as git submodules, so a fresh clone still needs:
 
 ```bash
-git submodule update --init --recursive quickjs-hook/quickjs-src
+git submodule update --init --recursive quickjs-hook/quickjs-src SukiSU_KernelPatch_patch
 ```
 
 LSPlant is already vendored in-tree and does not require a separate checkout step.
@@ -164,6 +164,8 @@ The current tree has switched the `ldmonitor` path toward the KPM backend instea
 - related resources live in `ldmonitor-kpm`
 
 If you want this path enabled, you still need to deploy the matching KPM module to the target device.
+
+To build the KPM module itself, initialize the `SukiSU_KernelPatch_patch` submodule first.
 
 ## QBDI
 

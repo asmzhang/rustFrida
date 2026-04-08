@@ -164,7 +164,7 @@ fn main() {
             }
         }
     } else if let Some(so_pattern) = &args.watch_so {
-        // 使用 eBPF 监听 SO 加载
+        // 使用 KPM 监听 SO 加载
         match watch_and_inject(so_pattern, args.timeout, &string_overrides) {
             Ok(fd) => (resolved_pid, fd),
             Err(e) => {

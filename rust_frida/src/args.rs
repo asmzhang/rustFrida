@@ -22,7 +22,7 @@ inline hook、Frida Stalker 追踪等功能。
 常见用法:
   rustfrida --pid 1234                         # 注入到指定 PID
   rustfrida --name com.example.app             # 按进程名注入
-  rustfrida --watch-so libnative.so            # 等待 SO 加载后自动注入
+  rustfrida --watch-so libnative.so            # 等待 SO 加载后自动注入（KPM 后端）
   rustfrida --spawn com.example.app            # Spawn 模式：启动前注入
   rustfrida --pid 1234 -l script.js            # 注入并执行 JS 脚本
   rustfrida --pid 1234 --verbose               # 显示详细注入调试信息
@@ -51,7 +51,8 @@ pub(crate) struct Args {
     )]
     pub(crate) pid: Option<i32>,
 
-    /// 监听指定 SO 路径加载，自动附加到加载该 SO 的进程（需要 ldmonitor eBPF 组件：cargo build -p ldmonitor）
+    /// 监听指定 SO 路径加载，自动附加到加载该 SO 的进程
+    /// 当前实现使用 ldmonitor 的 KPM/dmesg 后端，设备侧需要先部署匹配的 KPM 模块
     #[arg(short = 'w', long = "watch-so", conflicts_with_all = ["name", "spawn"])]
     pub(crate) watch_so: Option<String>,
 

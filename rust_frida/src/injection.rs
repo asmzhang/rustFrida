@@ -153,7 +153,7 @@ fn find_data_dir_by_uid(uid: u32) -> Option<String> {
     }
 }
 
-/// 使用 eBPF 监听 SO 加载并自动附加
+/// 使用 ldmonitor 的 KPM/dmesg 后端监听 SO 加载并自动附加
 pub(crate) fn watch_and_inject(
     so_pattern: &str,
     timeout_secs: Option<u64>,
@@ -162,9 +162,9 @@ pub(crate) fn watch_and_inject(
     use ldmonitor::DlopenMonitor;
     use std::time::Duration;
 
-    log_info!("正在启动 eBPF 监听器，等待加载: {}", so_pattern);
+    log_info!("正在启动 KPM 监听器，等待加载: {}", so_pattern);
 
-    let monitor = DlopenMonitor::new(None).map_err(|e| format!("启动 eBPF 监听失败: {}", e))?;
+    let monitor = DlopenMonitor::new(None).map_err(|e| format!("启动 KPM 监听失败: {}", e))?;
 
     let info = if let Some(secs) = timeout_secs {
         log_info!("超时时间: {} 秒", secs);

@@ -112,6 +112,69 @@ pub(super) fn resolve_art_method(
     }
 }
 
+/// Resolve a Java method to both a reflected `java.lang.reflect.Method` / `Constructor`
+/// object and its ArtMethod pointer. The returned reflected object is a JNI local ref.
+pub(super) fn resolve_reflected_method(
+    env: JniEnv,
+    class_name: &str,
+    method_name: &str,
+    signature: &str,
+    force_static: bool,
+) -> Result<(*mut std::ffi::c_void, u64, bool), String> {
+    let c_method = CString::new(method_name).map_err(|_| "invalid method name")?;
+    let c_sig = CString::new(signature).map_err(|_| "invalid signature")?;
+
+    unsafe {
+        let cls = find_class_safe(env, class_name);
+        if cls.is_null() {
+            jni_check_exc(env);
+            return Err(format!("FindClass('{}') failed", class_name));
+        }
+
+        let delete_local_ref: DeleteLocalRefFn =
+            jni_fn!(env, DeleteLocalRefFn, JNI_DELETE_LOCAL_REF);
+        let to_reflected: ToReflectedMethodFn =
+            jni_fn!(env, ToReflectedMethodFn, JNI_TO_REFLECTED_METHOD);
+
+        if !force_static {
+            let get_method_id: GetMethodIdFn = jni_fn!(env, GetMethodIdFn, JNI_GET_METHOD_ID);
+            let method_id = get_method_id(env, cls, c_method.as_ptr(), c_sig.as_ptr());
+            if !method_id.is_null() && !jni_check_exc(env) {
+                let reflected = to_reflected(env, cls, method_id, 0);
+                if !reflected.is_null() && !jni_check_exc(env) {
+                    let art_method = decode_method_id(env, cls, method_id as u64, false);
+                    delete_local_ref(env, cls);
+                    return Ok((reflected, art_method, false));
+                }
+                jni_check_exc(env);
+            } else {
+                jni_check_exc(env);
+            }
+        }
+
+        let get_static_method_id: GetStaticMethodIdFn =
+            jni_fn!(env, GetStaticMethodIdFn, JNI_GET_STATIC_METHOD_ID);
+        let method_id = get_static_method_id(env, cls, c_method.as_ptr(), c_sig.as_ptr());
+        if !method_id.is_null() && !jni_check_exc(env) {
+            let reflected = to_reflected(env, cls, method_id, 1);
+            if !reflected.is_null() && !jni_check_exc(env) {
+                let art_method = decode_method_id(env, cls, method_id as u64, true);
+                delete_local_ref(env, cls);
+                return Ok((reflected, art_method, true));
+            }
+            jni_check_exc(env);
+        } else {
+            jni_check_exc(env);
+        }
+
+        delete_local_ref(env, cls);
+        Err(format!(
+            "method not found: {}.{}{}",
+            class_name, method_name, signature
+        ))
+    }
+}
+
 /// Read the entry_point_from_quick_compiled_code_ from ArtMethod
 pub(super) unsafe fn read_entry_point(art_method: u64, offset: usize) -> u64 {
     let ptr = (art_method as usize + offset) as *const u64;

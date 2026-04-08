@@ -371,7 +371,7 @@ pub unsafe extern "C" fn java_hook_dispatch_from_quick(
         is_static,
         param_count,
         return_type,
-        return_type_sig,
+        _return_type_sig,
         param_types,
         class_global_ref,
     ) = {
@@ -432,11 +432,7 @@ pub unsafe extern "C" fn java_hook_dispatch_from_quick(
     ));
 
     // DEBUG: 跳过所有操作，纯 return（验证 dispatch+RET 本身是否安全）
-    crate::jsapi::console::output_verbose("[dispatch] PURE RETURN (no JS, no clone)");
     (*ctx_ptr).x[0] = 0; // 返回 null/0
-    return;
-
-    #[allow(unreachable_code)]
     invoke_hook_callback_common(
         ctx_usize,
         &callback_bytes,

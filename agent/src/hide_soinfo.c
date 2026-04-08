@@ -355,3 +355,19 @@ static void hide_from_solist(void) {
     g_hide_result.entries_scanned = count;
     FAIL(-9, "target not found in solist");
 }
+
+// 兼容较高版本 Android NDK 因删除 libgcc 导致的 __clear_cache 符号缺失
+__attribute__((used, visibility("default"), noinline))
+void __clear_cache(void *begin, void *end) {
+    uintptr_t addr = (uintptr_t)begin & ~(uintptr_t)63;
+    uintptr_t limit = (uintptr_t)end;
+    for (; addr < limit; addr += 64) {
+        __asm__ volatile("dc civac, %0" :: "r"(addr) : "memory");
+    }
+    __asm__ volatile("dsb ish" ::: "memory");
+    addr = (uintptr_t)begin & ~(uintptr_t)63;
+    for (; addr < limit; addr += 64) {
+        __asm__ volatile("ic ivau, %0" :: "r"(addr) : "memory");
+    }
+    __asm__ volatile("dsb ish\n\tisb" ::: "memory");
+}

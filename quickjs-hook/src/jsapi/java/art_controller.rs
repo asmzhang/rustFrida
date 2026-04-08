@@ -437,10 +437,26 @@ pub(super) fn ensure_art_controller_initialized(
     // 线程后 patch，我们目前没有这个机制。
     // replacement 方法的 quickCode 仍指向 jni_trampoline（不经过 Layer 1），
     // 路由通过 Layer 2 (DoCall) 和 Layer 3 (per-method hook) 覆盖。
-    let stubs = [
+    let mut stubs: Vec<(&str, u64)> = vec![
         ("quick_to_interpreter_bridge", bridge.quick_to_interpreter_bridge),
         ("quick_resolution_trampoline", bridge.quick_resolution_trampoline),
     ];
+    if bridge.resolved_interpreter_bridge_entrypoint != 0
+        && bridge.resolved_interpreter_bridge_entrypoint != bridge.quick_to_interpreter_bridge
+    {
+        stubs.push((
+            "resolved_interpreter_bridge_entrypoint",
+            bridge.resolved_interpreter_bridge_entrypoint,
+        ));
+    }
+    if bridge.resolved_resolution_entrypoint != 0
+        && bridge.resolved_resolution_entrypoint != bridge.quick_resolution_trampoline
+    {
+        stubs.push((
+            "resolved_resolution_entrypoint",
+            bridge.resolved_resolution_entrypoint,
+        ));
+    }
 
     for (name, addr) in &stubs {
         if *addr == 0 {
@@ -963,6 +979,9 @@ unsafe fn synchronize_replacement_methods() {
     };
 
     for (_, data) in registry.iter() {
+        if !matches!(&data.hook_type, HookType::Replaced { .. }) {
+            continue;
+        }
         let art_method = data.art_method as usize;
 
         // --- Fix 1: declaring_class_ 同步 ---
@@ -972,7 +991,9 @@ unsafe fn synchronize_replacement_methods() {
         {
             let declaring_class = std::ptr::read_volatile(art_method as *const u32);
             // 同步 replacement 的 declaring_class_ (对标 Frida synchronize_replacement_methods)
-            let HookType::Replaced { replacement_addr, .. } = &data.hook_type;
+            let HookType::Replaced { replacement_addr, .. } = &data.hook_type else {
+                continue;
+            };
             if *replacement_addr != 0 {
                 std::ptr::write_volatile(*replacement_addr as *mut u32, declaring_class);
             }
@@ -989,7 +1010,9 @@ unsafe fn synchronize_replacement_methods() {
 
         // --- Fix 2 + existing: entry_point 验证与恢复 ---
         // 对标 Frida synchronize_replacement_methods: nterp → quick_to_interpreter_bridge
-        let HookType::Replaced { per_method_hook_target, .. } = &data.hook_type;
+        let HookType::Replaced { per_method_hook_target, .. } = &data.hook_type else {
+            continue;
+        };
         if per_method_hook_target.is_none() {
             // 共享 stub 方法: 如果 GC 重置 entry_point 为 nterp，再降级为 interpreter_bridge
             if nterp != 0 && interp_bridge != 0 {

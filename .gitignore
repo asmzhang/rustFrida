@@ -4,8 +4,8 @@
 *.md
 *.lock
 qbdi/libQBDI.a
+qbdi/.inspect/
 loader/loader_check.o
 tools/*_test.js
 tools/*_test.sh
 CLAUDE.md
-scripts/

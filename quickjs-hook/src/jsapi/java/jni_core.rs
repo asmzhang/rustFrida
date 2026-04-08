@@ -667,6 +667,11 @@ pub(super) unsafe fn get_runtime_addr() -> Option<u64> {
     }
 }
 
+pub(crate) fn get_java_vm() -> Option<*mut std::ffi::c_void> {
+    let guard = JNI_STATE.lock().unwrap_or_else(|e| e.into_inner());
+    guard.as_ref().map(|state| state.vm)
+}
+
 /// Initialize JNI state by finding the existing JavaVM in the target process,
 /// then return a JNIEnv* for the **current thread** via AttachCurrentThread.
 ///

@@ -115,7 +115,19 @@ void free_entry(HookEntry* entry) {
 /* --- Cache flush --- */
 
 void hook_flush_cache(void* start, size_t size) {
-    __builtin___clear_cache((char*)start, (char*)start + size);
+    /* 直接用内联汇编刷新 cache，避免依赖 __clear_cache 外部符号
+     * （在注入进程中 compiler-rt/libgcc 未加载会导致 dlopen 失败） */
+    uintptr_t addr = (uintptr_t)start & ~(uintptr_t)63;
+    uintptr_t end  = (uintptr_t)start + size;
+    for (; addr < end; addr += 64) {
+        __asm__ volatile("dc civac, %0" :: "r"(addr) : "memory");
+    }
+    __asm__ volatile("dsb ish" ::: "memory");
+    addr = (uintptr_t)start & ~(uintptr_t)63;
+    for (; addr < end; addr += 64) {
+        __asm__ volatile("ic ivau, %0" :: "r"(addr) : "memory");
+    }
+    __asm__ volatile("dsb ish\n\tisb" ::: "memory");
 }
 
 /* --- wxshadow (two-step shadow page patching) --- */
